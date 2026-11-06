@@ -148,6 +148,7 @@ export async function renderExport(o: ExportOptions): Promise<ExportResult> {
 
   const dis = new Dissolver()
   dis.build(obj, transparent || keyed ? null : bg, o.params.count, o.params.seed)
+  dis.solid = keyed
 
   const art = mk(W, H)
   const actx = art.getContext('2d')!

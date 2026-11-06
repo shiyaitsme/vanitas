@@ -64,6 +64,10 @@ export class Dissolver {
   obj: HTMLCanvasElement | null = null
   bg: HTMLCanvasElement | null = null
   layer: HTMLCanvasElement | null = null
+  /** one pixel per particle cell; scaled up with smoothing to cut soft-edged holes in the intact layer */
+  holes: HTMLCanvasElement | null = null
+  gw = 0
+  gh = 0
   minX = 0
   maxX = 0
   minY = 0
@@ -78,6 +82,11 @@ export class Dissolver {
   s2 = new Float32Array(0)
   s3 = new Float32Array(0)
   life = new Float32Array(0)
+  cellIdx = new Int32Array(0)
+  /** 255 for grid cells that hold no particle (outside the object), so the soft hole never leaves a rim there */
+  outside = new Uint8Array(0)
+  /** keep particles fully opaque and shrink them away instead of fading (no colour bleed over a green-screen matte) */
+  solid = false
 
   /** Number of selected pixels sampled into particles (0 when nothing is selected). */
   get count() {
@@ -94,6 +103,7 @@ export class Dissolver {
     if (!this.layer) this.layer = document.createElement('canvas')
     this.layer.width = W
     this.layer.height = H
+    if (!this.holes) this.holes = document.createElement('canvas')
 
     const data = obj.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, W, H).data
 
@@ -105,6 +115,10 @@ export class Dissolver {
     const area = Math.max(1, hits * 9)
     const cell = Math.max(1.2, Math.sqrt(area / count))
     this.cell = cell
+    this.gw = Math.ceil(W / cell)
+    this.gh = Math.ceil(H / cell)
+    this.holes!.width = this.gw
+    this.holes!.height = this.gh
 
     const rand = rng(seed * 9973 + 1)
     const max = Math.ceil((W / cell) * (H / cell)) + 8
@@ -117,6 +131,7 @@ export class Dissolver {
     const s1 = new Float32Array(max)
     const s2 = new Float32Array(max)
     const s3 = new Float32Array(max)
+    const idx = new Int32Array(max)
     let n = 0
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
     for (let gy = cell / 2; gy < H; gy += cell) {
@@ -127,6 +142,7 @@ export class Dissolver {
         if (data[i + 3] < 24) continue
         x[n] = gx
         y[n] = gy
+        idx[n] = Math.floor(gy / cell) * this.gw + Math.floor(gx / cell)
         r[n] = data[i]
         g[n] = data[i + 1]
         b[n] = data[i + 2]
@@ -156,6 +172,10 @@ export class Dissolver {
     this.s2 = s2
     this.s3 = s3
     this.life = new Float32Array(n)
+    this.cellIdx = idx
+    const outside = new Uint8Array(this.gw * this.gh).fill(255)
+    for (let i = 0; i < n; i++) outside[idx[i]] = 0
+    this.outside = outside
   }
 
   render(ctx: CanvasRenderingContext2D, t: number, p: Params, dpr: number) {
@@ -192,7 +212,10 @@ export class Dissolver {
     lctx.globalCompositeOperation = 'source-over'
     lctx.clearRect(0, 0, W, H)
     lctx.drawImage(this.obj, 0, 0)
-    const half = cell / 2 + 0.6
+    const { gw, gh } = this
+    const hctx = this.holes!.getContext('2d')!
+    const hd = hctx.createImageData(gw, gh)
+    for (let j = 0; j < gw * gh; j++) hd.data[j * 4 + 3] = this.outside[j]
     for (let i = 0; i < n; i++) {
       const x0 = this.x[i]
       const y0 = this.y[i]
@@ -201,8 +224,15 @@ export class Dissolver {
       const delay = proj * 0.5 + noise * 0.18 + this.s1[i] * 0.08
       const life = clamp((T - delay) / 0.4)
       this.life[i] = life
-      if (life > 0) lctx.clearRect(x0 - half, y0 - half, half * 2, half * 2)
+      if (life > 0) hd.data[this.cellIdx[i] * 4 + 3] = 255
     }
+    hctx.putImageData(hd, 0, 0)
+    // the grid is upscaled with smoothing, so the eaten-away edge is soft instead of blocky
+    lctx.globalCompositeOperation = 'destination-out'
+    lctx.imageSmoothingEnabled = true
+    lctx.imageSmoothingQuality = 'high'
+    lctx.drawImage(this.holes!, 0, 0, gw, gh, 0, 0, gw * cell, gh * cell)
+    lctx.globalCompositeOperation = 'source-over'
     ctx.drawImage(this.layer, 0, 0)
 
     // 2. flying particles
@@ -253,12 +283,21 @@ export class Dissolver {
       const y = y0 + dy * d + dx * side + wob * dx + p.gravity * life * life * D * 0.28
 
       const target = sMin + (sMax - sMin) * s2 * s2
-      const z = (baseSize + (target - baseSize) * smooth(0, 0.2, life)) * (1 - p.decay * life * 0.85)
+      const z =
+        (baseSize + (target - baseSize) * smooth(0, 0.2, life)) *
+        (1 - p.decay * life * 0.85) *
+        (this.solid ? 1 - smooth(0.6, 1, life) : 1)
       const rot = s1 * 6.283 + life * (s2 - 0.5) * 9
       const cs = Math.cos(rot)
       const sn = Math.sin(rot)
 
-      ctx.globalAlpha = 1 - smooth(0.5, 1, life)
+      // tumbling facets catch the light: brighten and darken with the particle's angle
+      const lit = 1 + 0.22 * Math.sin(rot * 1.7 + s3 * 6.283) * smooth(0, 0.15, life)
+      r = Math.min(255, r * lit)
+      g = Math.min(255, g * lit)
+      b = Math.min(255, b * lit)
+
+      ctx.globalAlpha = this.solid ? 1 : 1 - smooth(0.5, 1, life)
       ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`
       ctx.setTransform(cs, sn, -sn, cs, x, y)
 
