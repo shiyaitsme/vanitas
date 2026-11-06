@@ -8,6 +8,7 @@ import type { ExportOptions, FillSpec } from '../lib/exporter'
 import {
   clearMask, invertMask, maskFromAlpha, mk, selectAll,
 } from '../lib/selection'
+import { Sam } from '../lib/sam'
 import { ringPath } from '../lib/thorns'
 import { Ghost, ThemeToggle } from './Bits'
 import { Chips, Dial, Slider, Swatches } from './Controls'
@@ -41,7 +42,7 @@ const TOTAL_FRAMES = Math.round(DURATION * FPS)
 const MAX_SIDE = 1600
 
 const TOOLS = [
-  { id: 'auto', icon: <IconAuto />, en: 'Auto', cn: '点击选择', hint: 'Coming next · 即将接入' },
+  { id: 'auto', icon: <IconAuto />, en: 'Auto', cn: '点击选择', hint: 'Click an object · 点击物体自动选择' },
   { id: 'brush', icon: <IconBrush />, en: 'Brush', cn: '画笔', hint: 'Paint what dissolves · 涂抹要溶解的部分' },
   { id: 'lasso', icon: <IconLasso />, en: 'Lasso', cn: '套索', hint: 'Draw around it · 圈出对象' },
   { id: 'erase', icon: <IconEraser />, en: 'Erase', cn: '擦除', hint: 'Subtract · 从选区擦除' },
@@ -156,6 +157,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [panelOpen, setPanelOpen] = useState(true)
   const [exportOpen, setExportOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
   const [brush, setBrush] = useState(48)
   const [showMask, setShowMask] = useState(true)
@@ -166,6 +168,8 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [fillColor, setFillColor] = useState('#F4F2ED')
   const [plate, setPlate] = useState<{ canvas: HTMLCanvasElement; url: string; name: string } | null>(null)
   const plateInput = useRef<HTMLInputElement>(null)
+  const samRef = useRef<Sam | null>(null)
+  const samBusy = useRef(false)
   const fill = useMemo<FillSpec>(
     () =>
       fillMode === 'plate' && plate
@@ -368,6 +372,54 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     commit()
   }
 
+  const getSam = () => {
+    if (!samRef.current) {
+      samRef.current = new Sam()
+      samRef.current.onProgress = (p) => setBusy(`Downloading model ${Math.round(p)}% · 下载模型中`)
+    }
+    return samRef.current
+  }
+
+  // warm up: download the model and embed the photo as soon as the Auto tool is chosen
+  useEffect(() => {
+    const base = baseRef.current
+    if (tool !== 'auto' || !base || docVersion === 0) return
+    setBusy('Preparing image · 正在分析图片')
+    getSam()
+      .prepare(base)
+      .then(() => setBusy(null))
+      .catch((e) => {
+        setBusy(null)
+        setToast(`Auto select failed: ${e.message} · 自动选择失败`)
+      })
+  }, [tool, docVersion])
+
+  useEffect(() => () => samRef.current?.dispose(), [])
+
+  const autoSelect = async (p: { x: number; y: number }) => {
+    const base = baseRef.current
+    const mask = maskRef.current
+    if (!base || !mask || samBusy.current) return
+    if (p.x < 0 || p.y < 0 || p.x >= base.width || p.y >= base.height) return
+    samBusy.current = true
+    setPlaying(false)
+    try {
+      const sam = getSam()
+      await sam.prepare(base)
+      setBusy('Selecting · 选择中')
+      const m = await sam.segment(p.x, p.y)
+      const ctx = mask.getContext('2d')!
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.drawImage(m, 0, 0, mask.width, mask.height)
+      commit()
+    } catch (e) {
+      setToast(`Auto select failed: ${e instanceof Error ? e.message : e} · 自动选择失败`)
+    } finally {
+      samBusy.current = false
+      setBusy(null)
+    }
+  }
+
   const currentTool = TOOLS.find((t) => t.id === tool)!
   const painting = tool === 'brush' || tool === 'erase'
 
@@ -440,7 +492,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
             tick={maskTick}
             onStart={() => setPlaying(false)}
             onCommit={commit}
-            onAuto={() => setToast('Click-to-select arrives in a later step · 点击自动选择将在后续步骤接入')}
+            onAuto={autoSelect}
           />
           {!hasMask && docVersion > 0 && (
             <div className="empty-hint mono">
@@ -698,7 +750,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
           }}
         />
       )}
-      {toast && <div className="toast mono">{toast}</div>}
+      {(busy || toast) && <div className="toast mono">{busy ?? toast}</div>}
     </div>
   )
 }
