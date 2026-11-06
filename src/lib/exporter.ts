@@ -7,7 +7,7 @@ import { Dissolver } from './dissolve'
 import type { Params } from './dissolve'
 import { fillHoles } from './inpaint'
 import { hasContent, isMostlyOpaque, mk, placeRect } from './selection'
-import { lightWrap, matchColors, relight } from './scene'
+import { fadeEdges, lightWrap, matchColors, relight } from './scene'
 import type { Scene } from './scene'
 
 export const PAPER = '#f4f2ed'
@@ -66,6 +66,7 @@ export function buildLayers(
     matchColors(obj, bg, scene.match)
     relight(obj, bg, scene.light)
     lightWrap(obj, bg, scene.wrap)
+    fadeEdges(obj, r, scene.fade)
     return { obj, bg, any }
   }
 

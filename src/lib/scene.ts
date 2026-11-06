@@ -16,6 +16,8 @@ export interface Scene {
   light: number
   /** 0..1 blur on flying particles, growing with distance */
   depth: number
+  /** 0..1 fade the object out toward the photo's own frame edges, so a cut-off crop blends into the backdrop */
+  fade: number
 }
 
 const SRGB_TO_LIN = new Float32Array(256)
@@ -225,4 +227,46 @@ export function lightWrap(obj: HTMLCanvasElement, backdrop: HTMLCanvasElement, a
   octx.drawImage(band, 0, 0)
   octx.globalAlpha = 1
   octx.globalCompositeOperation = 'source-over'
+}
+
+/**
+ * Feather the object toward the edges of the photo's frame (`r`, in canvas px). Where the subject runs off
+ * the photo (e.g. a cropped bottom) it fades out instead of ending in a hard line. Pixels away from the
+ * frame edges are untouched. `amount` 0..1.
+ */
+export function fadeEdges(obj: HTMLCanvasElement, r: { x: number; y: number; w: number; h: number }, amount: number) {
+  if (amount <= 0.005) return
+  const W = obj.width
+  const H = obj.height
+  const fx = amount * 0.3 * r.w
+  const fy = amount * 0.3 * r.h
+  const mask = canvas(W, H)
+  const m = mask.getContext('2d')!
+  m.fillStyle = '#fff'
+  m.fillRect(r.x, r.y, r.w, r.h)
+  m.globalCompositeOperation = 'destination-out'
+  // eased falloff: fully transparent at the frame edge, opaque `f` px inside
+  const ease = (g: CanvasGradient) => {
+    for (let i = 0; i <= 8; i++) {
+      const u = i / 8
+      g.addColorStop(u, `rgba(0,0,0,${(1 - u * u * (3 - 2 * u)).toFixed(3)})`)
+    }
+    return g
+  }
+  if (fy > 1) {
+    m.fillStyle = ease(m.createLinearGradient(0, r.y, 0, r.y + fy))
+    m.fillRect(r.x, r.y, r.w, fy)
+    m.fillStyle = ease(m.createLinearGradient(0, r.y + r.h, 0, r.y + r.h - fy))
+    m.fillRect(r.x, r.y + r.h - fy, r.w, fy)
+  }
+  if (fx > 1) {
+    m.fillStyle = ease(m.createLinearGradient(r.x, 0, r.x + fx, 0))
+    m.fillRect(r.x, r.y, fx, r.h)
+    m.fillStyle = ease(m.createLinearGradient(r.x + r.w, 0, r.x + r.w - fx, 0))
+    m.fillRect(r.x + r.w - fx, r.y, fx, r.h)
+  }
+  const ctx = obj.getContext('2d')!
+  ctx.globalCompositeOperation = 'destination-in'
+  ctx.drawImage(mask, 0, 0)
+  ctx.globalCompositeOperation = 'source-over'
 }
