@@ -1,9 +1,12 @@
-// Click-to-select: SlimSAM running in a worker (transformers.js). Weights come from the Hugging Face CDN on first use.
+// Click-to-select: SlimSAM (int8) running in a worker (transformers.js). Weights are served from this site (/models/slimsam),
+// because huggingface.co is unreachable from some networks.
 import { AutoProcessor, RawImage, SamModel, Tensor, env } from '@huggingface/transformers'
 
-env.allowLocalModels = false
+env.allowRemoteModels = false
+env.allowLocalModels = true
+env.localModelPath = `${self.location.origin}/models/`
 
-const MODEL = 'Xenova/slimsam-77-uniform'
+const MODEL = 'slimsam'
 
 type In =
   | { type: 'embed'; id: number; width: number; height: number; data: Uint8ClampedArray }
@@ -19,24 +22,10 @@ function load(): Promise<Loaded> {
     const progress_callback = (p: { status: string; progress?: number }) => {
       if (p.status === 'progress' && typeof p.progress === 'number') postMessage({ type: 'progress', value: p.progress })
     }
-    const device = 'gpu' in navigator ? 'webgpu' : 'wasm'
-    // try the Hugging Face Hub first, then a public mirror (the Hub is unreachable from some networks)
-    const hosts = ['https://huggingface.co/', 'https://hf-mirror.com/']
-    const attempt = async (i: number): Promise<Loaded> => {
-      env.remoteHost = hosts[i]
-      try {
-        const [model, processor] = await Promise.all([
-          SamModel.from_pretrained(MODEL, { device, progress_callback }),
-          AutoProcessor.from_pretrained(MODEL),
-        ])
-        return { model: model as SamModel, processor }
-      } catch (err) {
-        if (i + 1 < hosts.length) return attempt(i + 1)
-        const m = err instanceof Error ? err.message : String(err)
-        throw new Error(`${m} (${hosts.join(', ')}; device ${device})`)
-      }
-    }
-    const p: Promise<Loaded> = attempt(0)
+    const p: Promise<Loaded> = Promise.all([
+      SamModel.from_pretrained(MODEL, { device: 'wasm', dtype: 'q8', progress_callback }),
+      AutoProcessor.from_pretrained(MODEL),
+    ]).then(([model, processor]) => ({ model: model as SamModel, processor }))
     p.catch(() => {
       loading = null
     })
