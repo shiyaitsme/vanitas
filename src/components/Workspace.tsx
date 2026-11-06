@@ -37,9 +37,8 @@ const ASPECTS = {
 } as const
 type Aspect = keyof typeof ASPECTS
 
-const DURATION = 3.2
+const BASE_DURATION = 3.2
 const FPS = 30
-const TOTAL_FRAMES = Math.round(DURATION * FPS)
 const MAX_SIDE = 1600
 
 const TOOLS = [
@@ -155,6 +154,8 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [filter, setFilter] = useState<FilterId>('none')
   const [playing, setPlaying] = useState(false)
   const [loop, setLoop] = useState(true)
+  /** playback/export speed multiplier: 2 = twice as fast (half the duration) */
+  const [rate, setRate] = useState(1)
   const [panelOpen, setPanelOpen] = useState(true)
   const [exportOpen, setExportOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -245,6 +246,9 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const timeRef = useRef<HTMLSpanElement>(null)
   const frameRef = useRef<HTMLSpanElement>(null)
   paramsRef.current = params
+  const duration = BASE_DURATION / rate
+  const durationRef = useRef(duration)
+  durationRef.current = duration
 
   const set = <K extends keyof Params>(k: K, v: Params[K]) => setParams((p) => ({ ...p, [k]: v }))
 
@@ -272,14 +276,20 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
 
   const syncTime = useCallback(() => {
     const t = tRef.current
+    const dur = durationRef.current
+    const total = Math.round(dur * FPS)
     if (scrubRef.current) {
       scrubRef.current.value = String(Math.round(t * 1000))
       scrubRef.current.style.setProperty('--p', `${t * 100}%`)
     }
-    if (timeRef.current) timeRef.current.textContent = `${(t * DURATION).toFixed(2)}s / ${DURATION.toFixed(2)}s`
+    if (timeRef.current) timeRef.current.textContent = `${(t * dur).toFixed(2)}s / ${dur.toFixed(2)}s`
     if (frameRef.current)
-      frameRef.current.textContent = `FRAME ${String(Math.round(t * TOTAL_FRAMES)).padStart(3, '0')}/${TOTAL_FRAMES}`
+      frameRef.current.textContent = `FRAME ${String(Math.round(t * total)).padStart(3, '0')}/${total}`
   }, [])
+
+  useEffect(() => {
+    syncTime()
+  }, [rate, syncTime])
 
   const draw = useCallback(() => {
     const c = canvasRef.current
@@ -361,7 +371,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     const tick = (now: number) => {
       const dt = (now - last) / 1000
       last = now
-      let t = tRef.current + dt / DURATION
+      let t = tRef.current + dt / durationRef.current
       if (t >= 1) {
         if (loop) t = 0
         else {
@@ -474,6 +484,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
           cn="重置"
           onClick={() => {
             setParams(DEFAULT_PARAMS)
+            setRate(1)
             setFilter('none')
           }}
         >
@@ -540,7 +551,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
           <span className="meta tl mono">{Math.round(stage.w * 2)} × {Math.round(stage.h * 2)}</span>
           <span className="meta tr mono">SEED {String(params.seed).padStart(3, '0')}</span>
           <span className="meta bl mono">{currentTool.hint}</span>
-          <span className="meta br mono" ref={frameRef}>FRAME 000/{TOTAL_FRAMES}</span>
+          <span className="meta br mono" ref={frameRef}>FRAME 000/{Math.round(duration * FPS)}</span>
         </div>
         <div className="aspects">
           {(Object.keys(ASPECTS) as Aspect[]).map((a) => (
@@ -612,6 +623,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
                 <span className="mono mini">Wind 风向</span>
                 <Dial value={params.angle} onChange={(v) => set('angle', v)} />
               </div>
+              <Slider label="Playback speed" cn="播放速度" value={rate} min={0.25} max={3} step={0.05} onChange={setRate} fmt={(v) => `${v.toFixed(2)}×`} />
               <Slider label="Speed" cn="速度" value={params.speed} min={0.2} max={2} step={0.01} onChange={(v) => set('speed', v)} fmt={(v) => v.toFixed(2)} />
               <Slider label="Spread" cn="扩散" value={params.spread} min={0} max={1.5} step={0.01} onChange={(v) => set('spread', v)} fmt={(v) => v.toFixed(2)} />
               <Slider label="Gravity" cn="重力" value={params.gravity} min={-0.5} max={1} step={0.01} onChange={(v) => set('gravity', v)} fmt={(v) => v.toFixed(2)} />
@@ -799,7 +811,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
             draw()
           }}
         />
-        <span className="mono time" ref={timeRef}>0.00s / {DURATION.toFixed(2)}s</span>
+        <span className="mono time" ref={timeRef}>0.00s / {duration.toFixed(2)}s</span>
         <span className="rec"><b /> REC <i className="cn">录制交互</i></span>
       </footer>
 
@@ -815,7 +827,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
               format: opt.format,
               shortSide: opt.shortSide,
               fps: opt.fps,
-              duration: DURATION,
+              duration,
               ratio: ASPECTS[aspect],
               stageW: stage.w,
               t: tRef.current,
