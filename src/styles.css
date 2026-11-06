@@ -141,7 +141,7 @@ body::before {
   --step: 0.27em;
   position: relative; margin: 0; width: 100%;
   font-family: var(--serif); font-weight: 600; font-variation-settings: 'opsz' 96;
-  font-size: min(20.5vw, 33vh);
+  font-size: min(22vw, 40vh);
   line-height: 0.8; letter-spacing: -0.015em; text-align: center; white-space: nowrap;
 }
 .ly { display: block; will-change: transform; }
