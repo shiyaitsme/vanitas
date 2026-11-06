@@ -9,6 +9,7 @@ import { fillHoles } from './inpaint'
 import { containRect, hasContent, isMostlyOpaque, mk } from './selection'
 
 export const PAPER = '#f4f2ed'
+export const GREEN_SCREEN = '#00ff00'
 
 /** Dilate a mask by r px so the fill tucks under the rim of the object's hole (no paper-coloured seam). */
 function grow(m: HTMLCanvasElement, r: number) {
@@ -98,6 +99,8 @@ export interface ExportOptions {
   t: number
   /** true: no paper and no untouched background, only the object and its particles (WebM, PNG, PNG sequence) */
   transparent: boolean
+  /** MP4 only: only the object and its particles, on a flat #00FF00 backdrop to key out in an editor that cannot read alpha */
+  greenScreen?: boolean
   params: Params
   /** CSS filter string applied to the artwork (not to the paper behind it) */
   filter: string
@@ -137,13 +140,14 @@ const toPng = (c: HTMLCanvasElement) =>
 export async function renderExport(o: ExportOptions): Promise<ExportResult> {
   const fmt = o.format
   const transparent = o.transparent && (fmt === 'webm' || fmt === 'png' || fmt === 'seq')
+  const keyed = !!o.greenScreen && fmt === 'mp4'
   const short = fmt === 'gif' ? Math.min(o.shortSide, GIF_MAX_SIDE) : o.shortSide
   const { w: W, h: H } = outputSize(o.ratio, short)
   const scale = W / o.stageW
   const { obj, bg } = buildLayers(o.base, o.mask, W, H, o.fill)
 
   const dis = new Dissolver()
-  dis.build(obj, transparent ? null : bg, o.params.count, o.params.seed)
+  dis.build(obj, transparent || keyed ? null : bg, o.params.count, o.params.seed)
 
   const art = mk(W, H)
   const actx = art.getContext('2d')!
@@ -155,7 +159,7 @@ export async function renderExport(o: ExportOptions): Promise<ExportResult> {
     octx.filter = 'none'
     octx.clearRect(0, 0, W, H)
     if (!transparent) {
-      octx.fillStyle = PAPER
+      octx.fillStyle = keyed ? GREEN_SCREEN : PAPER
       octx.fillRect(0, 0, W, H)
     }
     octx.filter = o.filter
