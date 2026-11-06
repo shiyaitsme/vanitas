@@ -37,5 +37,4 @@ Live: https://vanitas.shiya9863.workers.dev/ . Repo: `shiyaitsme/vanitas`, defau
 Done: steps 1 to 4, MP4 green screen, backdrop compositing (colour match, light wrap, relight, depth blur).
 Open, in the order the user is likely to want them:
 1. Try backdrop compositing with the user's real photos and tune the defaults (colour match 0.6, wrap 0.5, relight 0.4, depth 0.4) from their feedback.
-2. Merge or drop the unmerged fill improvement in `src/lib/inpaint.ts` (stash on `fix/fill-background-2`). Test it first; it only matters for opaque photos without a backdrop.
-3. Step 5: record interaction, custom particle sprites, WebGL2 engine (real motion blur belongs here). Optional `?review` annotation mode if the user asks for it.
+2. Step 5: record interaction, custom particle sprites, WebGL2 engine (real motion blur belongs here). Optional `?review` annotation mode if the user asks for it.

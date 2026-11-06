@@ -24,7 +24,6 @@ Not done or deliberately left out:
 - Animated WebP export (the browser cannot encode it without a WASM library).
 - Manual alignment of the clean plate. It is scaled to cover the photo.
 - A learned inpainter (LaMa). Auto fill is push-pull diffusion and smears busy backgrounds.
-  A fix that fills with the dominant surrounding colour exists as a local, unmerged change (`src/lib/inpaint.ts`, stash on `fix/fill-background-2`); it is untested.
 - Motion blur on particles, shadows cast by the object. Light direction is taken from the backdrop's brightest area, it cannot be set by hand.
 - Tested only in Chromium, mostly with synthetic images and the sample. Real photos, 2K and 60 fps exports were not run.
 - WebM with alpha is correct in Chrome, but CapCut ignores the alpha channel (shows black). For CapCut use MP4 green screen, or PNG sequence converted to ProRes 4444.
@@ -51,6 +50,8 @@ npm run build      # tsc --noEmit && vite build
   `placeRect` (scale and offset as fractions of the stage) and applies them in that order. Particles sample the graded object, so they inherit it.
   `Dissolver.depth` draws far-flying particles on a separate layer and blurs it (uses `ctx.filter`, so no blur in Safari).
 - `src/lib/inpaint.ts`: `fillHoles`, push-pull diffusion used by Auto fill (only when the photo is mostly opaque).
+  `favourBackground` first looks at a ring around the hole; when one colour covers at least 60% of it (RGB distance under 0.1 on a 0..1 scale),
+  pixels that differ from it are down-weighted so a dark neighbour no longer greys the fill. Otherwise it is plain diffusion.
 - Dissolve edge: holes in the intact layer are cut from a one-pixel-per-cell grid scaled up with smoothing (soft edge, not blocks). `Dissolver.solid`
   (green-screen export) keeps particles opaque and shrinks them instead of fading, so no green bleeds into them.
 - `src/lib/exporter.ts`:

@@ -46,6 +46,74 @@ function sample(l: Level, fx: number, fy: number, out: number[]) {
   }
 }
 
+
+/**
+ * Plain diffusion averages every neighbour, so a dark shape next to a light background turns the hole grey.
+ * Find the dominant colour in a ring around the hole and, when one clearly dominates, down-weight known
+ * pixels that differ from it. The hole then fills with the background instead of a blend with other objects.
+ */
+function favourBackground(d0: Float32Array, md: Uint8ClampedArray, w: number, h: number) {
+  // ring = pixels within r of the hole (separable box dilation)
+  const r = Math.max(4, Math.round(Math.max(w, h) * 0.12))
+  let cur = new Uint8Array(w * h)
+  for (let i = 0; i < w * h; i++) cur[i] = md[i * 4 + 3] > 8 ? 1 : 0
+  const pass = (src: Uint8Array, horizontal: boolean) => {
+    const out = new Uint8Array(w * h)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let hit = 0
+        for (let k = -r; k <= r && !hit; k++) {
+          const xx = horizontal ? x + k : x
+          const yy = horizontal ? y : y + k
+          if (xx >= 0 && xx < w && yy >= 0 && yy < h && src[yy * w + xx]) hit = 1
+        }
+        out[y * w + x] = hit
+      }
+    }
+    return out
+  }
+  const ring = pass(pass(cur, true), false)
+
+  // histogram of known ring pixels, 8 levels per channel
+  const bins = new Map<number, { n: number; r: number; g: number; b: number }>()
+  let total = 0
+  for (let i = 0; i < w * h; i++) {
+    const wt = d0[i * 4 + 3]
+    if (!ring[i] || wt < 0.5) continue
+    const R = d0[i * 4] / wt, G = d0[i * 4 + 1] / wt, B = d0[i * 4 + 2] / wt
+    const key = (Math.min(7, (R * 8) | 0) << 6) | (Math.min(7, (G * 8) | 0) << 3) | Math.min(7, (B * 8) | 0)
+    const e = bins.get(key) ?? { n: 0, r: 0, g: 0, b: 0 }
+    e.n++; e.r += R; e.g += G; e.b += B
+    bins.set(key, e)
+    total++
+  }
+  if (total < 20) return
+  let best: { n: number; r: number; g: number; b: number } | null = null
+  for (const e of bins.values()) if (!best || e.n > best.n) best = e
+  if (!best) return
+  const br = best.r / best.n, bg = best.g / best.n, bb = best.b / best.n
+
+  // share of ring pixels close to the peak colour; if nothing dominates, keep plain diffusion
+  const near = 0.1
+  let close = 0
+  for (let i = 0; i < w * h; i++) {
+    const wt = d0[i * 4 + 3]
+    if (!ring[i] || wt < 0.5) continue
+    const dr = d0[i * 4] / wt - br, dg = d0[i * 4 + 1] / wt - bg, db = d0[i * 4 + 2] / wt - bb
+    if (Math.sqrt(dr * dr + dg * dg + db * db) < near) close++
+  }
+  if (close / total < 0.6) return
+
+  for (let i = 0; i < w * h; i++) {
+    const wt = d0[i * 4 + 3]
+    if (wt <= 0) continue
+    const dr = d0[i * 4] / wt - br, dg = d0[i * 4 + 1] / wt - bg, db = d0[i * 4 + 2] / wt - bb
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db)
+    const k = Math.exp(-((dist / (near * 1.5)) ** 2))
+    d0[i * 4] *= k; d0[i * 4 + 1] *= k; d0[i * 4 + 2] *= k; d0[i * 4 + 3] *= k
+  }
+}
+
 /**
  * Returns a canvas (same size as `src`) in which the pixels covered by `mask`
  * are replaced by colours diffused in from the surrounding known pixels.
@@ -77,6 +145,8 @@ export function fillHoles(src: HTMLCanvasElement, mask: HTMLCanvasElement, maxSi
     d0[i * 4 + 2] = (sd[i * 4 + 2] / 255) * known
     d0[i * 4 + 3] = known
   }
+
+  favourBackground(d0, md, w, h)
 
   const pyramid: Level[] = [{ w, h, d: d0 }]
   while (pyramid[pyramid.length - 1].w > 1 || pyramid[pyramid.length - 1].h > 1) {
