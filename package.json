@@ -10,6 +10,7 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
     "fflate": "^0.8.3",
     "gifenc": "^1.0.3",
     "mediabunny": "^1.65.2",

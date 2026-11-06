@@ -19,7 +19,7 @@ interface Props {
   tick: number
   onStart: () => void
   onCommit: () => void
-  onAuto: () => void
+  onAuto: (p: { x: number; y: number }) => void
 }
 
 const TINT = 'rgba(242,167,195,0.58)'
@@ -142,7 +142,7 @@ export function SelectionOverlay({ baseRef, maskRef, w, h, tool, brush, visible,
 
   const onDown = (e: PointerEvent) => {
     if (tool === 'auto') {
-      onAuto()
+      onAuto(toBase(local(e)))
       return
     }
     e.currentTarget.setPointerCapture(e.pointerId)

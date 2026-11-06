@@ -15,7 +15,7 @@ Chinese is small annotation text in Noto Serif SC. Keep it to these three roles.
 | 1 | Manual selection (brush, erase, lasso, all / invert / clear / show mask) and object-only particle dissolve | Done |
 | 2 | Export MP4, PNG, GIF, WebM (with alpha), PNG sequence (zip) | Done |
 | 3 | Fill: Auto (diffusion), Clean plate upload, Solid colour | Done |
-| 4 | Auto select by click (SAM in the browser) | Next. The Auto tool is a stub that shows a toast |
+| 4 | Auto select by click (SlimSAM in a worker, weights from Hugging Face on first use) | Built. Model calls checked in Node on a synthetic image; not yet run in a browser |
 | 5 | Record interaction, custom particle sprites, WebGL2 engine | Later |
 
 Not done or deliberately left out:
@@ -38,6 +38,9 @@ npm run build      # tsc --noEmit && vite build
   with no accumulated simulation, so scrubbing and frame-exact export work. `Dissolver.build(obj, bg, count, seed)`,
   `render(ctx, t, params, dpr)`. The dissolve front sweeps across the object's own bounding extent, so t = 1 is fully dissolved.
 - `src/lib/selection.ts`: the mask lives in source-image coordinates, so changing the output aspect never distorts it.
+- `src/lib/sam.ts` + `sam.worker.ts`: click-to-select. The worker loads `Xenova/slimsam-77-uniform` through transformers.js (WebGPU if available, else wasm),
+  embeds the photo once when the Auto tool is chosen, then returns a mask per click. A click adds to the selection; use Erase to subtract.
+  `vite.config.ts` drops the 27 MB onnxruntime wasm from `dist` (Cloudflare limit is 25 MiB per file); it loads from jsDelivr at runtime.
 - `src/lib/inpaint.ts`: `fillHoles`, push-pull diffusion used by Auto fill (only when the photo is mostly opaque).
 - `src/lib/exporter.ts`:
   - `buildLayers` splits the photo into `obj` (selected) and `bg` (rest, with the hole filled by the chosen `FillSpec`).

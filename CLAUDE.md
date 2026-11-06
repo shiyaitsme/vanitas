@@ -32,5 +32,5 @@ Live: https://vanitas.shiya9863.workers.dev/ . Repo: `shiyaitsme/vanitas`, branc
 - Delete helper files (`.preview/`, runners, test images) before committing. `.gitignore` covers node_modules, dist, .wrangler.
 
 ## Next work
-Step 4: click-to-select with SAM in the browser (the Auto tool is currently a stub). Then step 5: record interaction,
+Step 4 is built (see README); verify it in a real browser. Then step 5: record interaction,
 custom particle sprites, WebGL2 engine. Optional `?review` annotation mode if the user asks for it.
