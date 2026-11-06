@@ -71,3 +71,11 @@ export function isMostlyOpaque(base: HTMLCanvasElement) {
   for (let i = 3; i < d.length; i += 4) if (d[i] > 250) opaque++
   return opaque / 1024 > 0.9
 }
+
+/** Where the source image sits in a (dw x dh) stage: contained, then scaled about the centre and shifted by a fraction of the stage. */
+export function placeRect(sw: number, sh: number, dw: number, dh: number, scale = 1, ox = 0, oy = 0) {
+  const r = containRect(sw, sh, dw, dh)
+  const w = r.w * scale
+  const h = r.h * scale
+  return { x: (dw - w) / 2 + ox * dw, y: (dh - h) / 2 + oy * dh, w, h, s: r.s * scale }
+}

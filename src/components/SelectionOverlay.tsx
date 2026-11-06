@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { PointerEvent, RefObject } from 'react'
-import { containRect, mk } from '../lib/selection'
+import { mk, placeRect } from '../lib/selection'
 import { THORN_CURSOR } from './Icons'
 
 type Tool = 'auto' | 'brush' | 'lasso' | 'erase'
@@ -15,6 +15,8 @@ interface Props {
   brush: number
   /** draw the pink selection tint */
   visible: boolean
+  /** where the object sits on the stage (backdrop mode) */
+  place?: { scale: number; x: number; y: number }
   /** bump to force a redraw after the mask changed from outside */
   tick: number
   onStart: () => void
@@ -24,7 +26,7 @@ interface Props {
 
 const TINT = 'rgba(242,167,195,0.58)'
 
-export function SelectionOverlay({ baseRef, maskRef, w, h, tool, brush, visible, tick, onStart, onCommit, onAuto }: Props) {
+export function SelectionOverlay({ baseRef, maskRef, w, h, tool, brush, visible, place, tick, onStart, onCommit, onAuto }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const tintRef = useRef<HTMLCanvasElement | null>(null)
   const posRef = useRef<{ x: number; y: number } | null>(null)
@@ -35,8 +37,8 @@ export function SelectionOverlay({ baseRef, maskRef, w, h, tool, brush, visible,
 
   const fit = useCallback(() => {
     const base = baseRef.current
-    return base ? containRect(base.width, base.height, w, h) : null
-  }, [baseRef, w, h])
+    return base ? placeRect(base.width, base.height, w, h, place?.scale, place?.x, place?.y) : null
+  }, [baseRef, w, h, place?.scale, place?.x, place?.y])
 
   const redraw = useCallback(() => {
     const c = canvasRef.current
