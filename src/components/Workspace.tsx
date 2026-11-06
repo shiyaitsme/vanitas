@@ -178,10 +178,11 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [wrap, setWrap] = useState(0.5)
   const [light, setLight] = useState(0.4)
   const [depth, setDepth] = useState(0.4)
+  const [fade, setFade] = useState(0.5)
   const backdropInput = useRef<HTMLInputElement>(null)
   const scene = useMemo<Scene | null>(
-    () => (backdrop ? { backdrop: backdrop.canvas, match, scale: objScale, x: objX, y: objY, wrap, light, depth } : null),
-    [backdrop, match, objScale, objX, objY, wrap, light, depth],
+    () => (backdrop ? { backdrop: backdrop.canvas, match, scale: objScale, x: objX, y: objY, wrap, light, depth, fade } : null),
+    [backdrop, match, objScale, objX, objY, wrap, light, depth, fade],
   )
   const place = useMemo(() => (scene ? { scale: scene.scale, x: scene.x, y: scene.y } : undefined), [scene])
 
@@ -684,6 +685,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
                   <Slider label="Light wrap" cn="边缘光晕" value={wrap} min={0} max={1} step={0.01} onChange={setWrap} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Relight" cn="光线方向" value={light} min={0} max={1} step={0.01} onChange={setLight} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Depth blur" cn="景深模糊" value={depth} min={0} max={1} step={0.01} onChange={setDepth} fmt={(v) => v.toFixed(2)} />
+                  <Slider label="Edge fade" cn="边缘淡出" value={fade} min={0} max={1} step={0.01} onChange={setFade} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Object size" cn="物体大小" value={objScale} min={0.15} max={1.4} step={0.01} onChange={setObjScale} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Position X" cn="水平位置" value={objX} min={-0.6} max={0.6} step={0.005} onChange={setObjX} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Position Y" cn="垂直位置" value={objY} min={-0.6} max={0.6} step={0.005} onChange={setObjY} fmt={(v) => v.toFixed(2)} />
