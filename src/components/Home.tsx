@@ -19,7 +19,10 @@ export function Home({ theme, onToggleTheme, onStart }: Props) {
   }
 
   return (
-    <div className="home enter">
+    <div
+      className="home enter"
+      onPointerMove={(e) => e.currentTarget.style.setProperty('--mx', ((e.clientX / window.innerWidth) * 2 - 1).toFixed(3))}
+    >
       <header className="top">
         <span className="mono">902-1003-0404</span>
         <span className="brand-mini">
@@ -33,7 +36,7 @@ export function Home({ theme, onToggleTheme, onStart }: Props) {
       </header>
 
       <div className="vertical-note" aria-hidden>
-        Memento mori — <i>everything returns to dust</i>
+        Memento mori — everything returns to dust
       </div>
 
       <main>
@@ -71,7 +74,7 @@ export function Home({ theme, onToggleTheme, onStart }: Props) {
 
       <footer className="foot">
         <span className="mono">Prod. 10---90</span>
-        <span className="gothic small">Select · Dissolve · Export</span>
+        <span className="mono mini">Select · Dissolve · Export</span>
         <span className="mono">{VERSION}</span>
       </footer>
     </div>

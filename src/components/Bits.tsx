@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react'
 
 /** Text button whose letters double and blur on hover. */
 export function Ghost({
@@ -15,13 +15,20 @@ export function Ghost({
   )
 }
 
-/** ECSTASY-style stacked, sliced display word. */
+const LAYERS = [-2, -1, 0, 1, 2]
+
+/**
+ * Display word repeated at equal size (ECSTASY) with out-of-focus echoes above and below
+ * that overlap the sharp centre line (focus). Layers drift apart with the pointer.
+ */
 export function SliceTitle({ text }: { text: string }) {
   return (
-    <h1 className="slice" aria-label={text}>
-      <span className="s1" aria-hidden>{text}</span>
-      <span className="s2" aria-hidden>{text}</span>
-      <span className="s3" aria-hidden>{text}</span>
+    <h1 className="stack" aria-label={text}>
+      {LAYERS.map((k) => (
+        <span key={k} className={`ly ${k === 0 ? 'core' : 'echo'} k${k < 0 ? 'n' : 'p'}${Math.abs(k)}`} style={{ '--k': k } as CSSProperties} aria-hidden>
+          {text}
+        </span>
+      ))}
     </h1>
   )
 }
