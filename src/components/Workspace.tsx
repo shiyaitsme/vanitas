@@ -3,9 +3,10 @@ import type { CSSProperties } from 'react'
 import { BRAND } from '../brand'
 import { DEFAULT_PARAMS, Dissolver } from '../lib/dissolve'
 import type { ColorMode, Params, Shape } from '../lib/dissolve'
-import { fillHoles } from '../lib/inpaint'
+import { buildLayers, download, isAbort, renderExport } from '../lib/exporter'
+import type { ExportOptions } from '../lib/exporter'
 import {
-  clearMask, containRect, hasContent, invertMask, isMostlyOpaque, maskFromAlpha, mk, selectAll,
+  clearMask, invertMask, maskFromAlpha, mk, selectAll,
 } from '../lib/selection'
 import { ringPath } from '../lib/thorns'
 import { Ghost, ThemeToggle } from './Bits'
@@ -219,35 +220,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     const H = Math.round(stage.h * dpr)
     c.width = W
     c.height = H
-    const r = containRect(base.width, base.height, W, H)
-
-    const src = mk(W, H)
-    src.getContext('2d')!.drawImage(base, r.x, r.y, r.w, r.h)
-    const m = mk(W, H)
-    m.getContext('2d')!.drawImage(mask, r.x, r.y, r.w, r.h)
-    const any = hasContent(mask)
-
-    const obj = mk(W, H)
-    const octx = obj.getContext('2d')!
-    octx.drawImage(src, 0, 0)
-    octx.globalCompositeOperation = 'destination-in'
-    octx.drawImage(m, 0, 0)
-
-    const bg = mk(W, H)
-    const bctx = bg.getContext('2d')!
-    if (any && isMostlyOpaque(base)) {
-      const fill = fillHoles(src, m)
-      const fctx = fill.getContext('2d')!
-      fctx.globalCompositeOperation = 'destination-in'
-      fctx.drawImage(m, 0, 0)
-      bctx.drawImage(fill, 0, 0)
-    }
-    const punched = mk(W, H)
-    const pctx = punched.getContext('2d')!
-    pctx.drawImage(src, 0, 0)
-    pctx.globalCompositeOperation = 'destination-out'
-    pctx.drawImage(m, 0, 0)
-    bctx.drawImage(punched, 0, 0)
+    const { obj, bg, any } = buildLayers(base, mask, W, H)
 
     dis.current!.build(obj, bg, params.count, params.seed)
     setHasMask(any)
@@ -576,9 +549,34 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
       {exportOpen && (
         <ExportModal
           onClose={() => setExportOpen(false)}
-          onRender={() => {
-            setExportOpen(false)
-            setToast('Rendering is not wired yet · 渲染导出将在下一阶段接入')
+          onRender={async (opt, onProgress, signal) => {
+            const base = baseRef.current
+            const mask = maskRef.current
+            if (!base || !mask) throw new Error('Nothing to export')
+            if (!hasMask) throw new Error('Select something to dissolve first · 先选择要溶解的对象')
+            const job: ExportOptions = {
+              format: opt.format,
+              shortSide: opt.shortSide,
+              fps: opt.fps,
+              duration: DURATION,
+              ratio: ASPECTS[aspect],
+              stageW: stage.w,
+              t: tRef.current,
+              params,
+              filter: FILTERS[filter],
+              base,
+              mask,
+              onProgress,
+              signal,
+            }
+            try {
+              const res = await renderExport(job)
+              download(res.blob, res.name)
+              setToast(`Saved ${res.name} · ${res.note}`)
+            } catch (e) {
+              if (isAbort(e)) return
+              throw e
+            }
           }}
         />
       )}

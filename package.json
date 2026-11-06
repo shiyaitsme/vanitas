@@ -10,6 +10,7 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
+    "mediabunny": "^1.65.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

@@ -383,3 +383,8 @@ input[type='range']:hover::-webkit-slider-thumb, input[type='range']:active::-we
   .panel { border-left: 0; border-top: 1px solid var(--faint); }
   .ws-top .file, .rec { display: none; }
 }
+
+/* export progress */
+.render-prog { display: flex; align-items: center; gap: 14px; }
+.render-prog .bar { flex: 1; height: 3px; background: var(--faint); position: relative; }
+.render-prog .bar b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink); transition: width 0.12s linear; }
