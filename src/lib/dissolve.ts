@@ -87,6 +87,9 @@ export class Dissolver {
   outside = new Uint8Array(0)
   /** keep particles fully opaque and shrink them away instead of fading (no colour bleed over a green-screen matte) */
   solid = false
+  /** 0..1 depth-of-field: far-flying particles are drawn on a separate layer and blurred */
+  depth = 0
+  far: HTMLCanvasElement | null = null
 
   /** Number of selected pixels sampled into particles (0 when nothing is selected). */
   get count() {
@@ -246,9 +249,24 @@ export class Dissolver {
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'center'
 
+    let fctx: CanvasRenderingContext2D | null = null
+    if (this.depth > 0.005) {
+      if (!this.far) this.far = document.createElement('canvas')
+      if (this.far.width !== W || this.far.height !== H) {
+        this.far.width = W
+        this.far.height = H
+      }
+      fctx = this.far.getContext('2d')!
+      fctx.setTransform(1, 0, 0, 1, 0, 0)
+      fctx.globalAlpha = 1
+      fctx.clearRect(0, 0, W, H)
+      fctx.textBaseline = 'middle'
+      fctx.textAlign = 'center'
+    }
     for (let i = 0; i < n; i++) {
       const life = this.life[i]
       if (life <= 0 || life >= 1) continue
+      const c = fctx && life > 0.4 ? fctx : ctx
       const x0 = this.x[i]
       const y0 = this.y[i]
       let r = this.r[i]
@@ -297,44 +315,51 @@ export class Dissolver {
       g = Math.min(255, g * lit)
       b = Math.min(255, b * lit)
 
-      ctx.globalAlpha = this.solid ? 1 : 1 - smooth(0.5, 1, life)
-      ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`
-      ctx.setTransform(cs, sn, -sn, cs, x, y)
+      c.globalAlpha = this.solid ? 1 : 1 - smooth(0.5, 1, life)
+      c.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`
+      c.setTransform(cs, sn, -sn, cs, x, y)
 
       switch (p.shape) {
         case 'square':
-          ctx.fillRect(-z / 2, -z / 2, z, z)
+          c.fillRect(-z / 2, -z / 2, z, z)
           break
         case 'dot':
-          ctx.beginPath()
-          ctx.arc(0, 0, z * 0.5, 0, 6.283)
-          ctx.fill()
+          c.beginPath()
+          c.arc(0, 0, z * 0.5, 0, 6.283)
+          c.fill()
           break
         case 'shard':
-          ctx.beginPath()
-          ctx.moveTo(-z * 0.5, -z * (0.2 + 0.4 * s1))
-          ctx.lineTo(z * (0.6 + 0.5 * s2), z * 0.1)
-          ctx.lineTo(-z * 0.1, z * (0.4 + 0.4 * s3))
-          ctx.closePath()
-          ctx.fill()
+          c.beginPath()
+          c.moveTo(-z * 0.5, -z * (0.2 + 0.4 * s1))
+          c.lineTo(z * (0.6 + 0.5 * s2), z * 0.1)
+          c.lineTo(-z * 0.1, z * (0.4 + 0.4 * s3))
+          c.closePath()
+          c.fill()
           break
         case 'petal':
-          ctx.beginPath()
-          ctx.ellipse(0, 0, z * 0.9, z * 0.4, 0, 0, 6.283)
-          ctx.fill()
+          c.beginPath()
+          c.ellipse(0, 0, z * 0.9, z * 0.4, 0, 0, 6.283)
+          c.fill()
           break
         case 'thorn':
-          ctx.beginPath()
-          ctx.moveTo(-z * 0.2, -z * 0.15)
-          ctx.quadraticCurveTo(z * 0.8, -z * 0.1, z * 1.7, 0)
-          ctx.quadraticCurveTo(z * 0.8, z * 0.25, -z * 0.2, z * 0.15)
-          ctx.fill()
+          c.beginPath()
+          c.moveTo(-z * 0.2, -z * 0.15)
+          c.quadraticCurveTo(z * 0.8, -z * 0.1, z * 1.7, 0)
+          c.quadraticCurveTo(z * 0.8, z * 0.25, -z * 0.2, z * 0.15)
+          c.fill()
           break
         case 'letter':
-          ctx.font = `700 ${Math.max(6 * dpr, z * 2.2)}px UnifrakturCook, serif`
-          ctx.fillText(LETTERS[(s1 * LETTERS.length) | 0], 0, 0)
+          c.font = `700 ${Math.max(6 * dpr, z * 2.2)}px UnifrakturCook, serif`
+          c.fillText(LETTERS[(s1 * LETTERS.length) | 0], 0, 0)
           break
       }
+    }
+    if (fctx && this.far) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.globalAlpha = 1
+      ctx.filter = `blur(${(this.depth * 3.2 * dpr).toFixed(2)}px)`
+      ctx.drawImage(this.far, 0, 0)
+      ctx.filter = 'none'
     }
     ctx.globalAlpha = 1
     ctx.setTransform(1, 0, 0, 1, 0, 0)

@@ -10,6 +10,12 @@ export interface Scene {
   /** object offset as a fraction of the stage width / height */
   x: number
   y: number
+  /** 0..1 backdrop colours spilling over the object's edge */
+  wrap: number
+  /** 0..1 lighten the side facing the backdrop's brightest area, dim the other */
+  light: number
+  /** 0..1 blur on flying particles, growing with distance */
+  depth: number
 }
 
 const SRGB_TO_LIN = new Float32Array(256)
@@ -100,4 +106,123 @@ export function matchColors(obj: HTMLCanvasElement, backdrop: HTMLCanvasElement,
     d[i + 2] = rgb[2]
   }
   ctx.putImageData(img, 0, 0)
+}
+
+const canvas = (w: number, h: number) => {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  return c
+}
+
+/** Pixels where the object is opaque: bounding box (stage px) or null. */
+function bounds(obj: HTMLCanvasElement) {
+  const s = Math.min(1, 200 / Math.max(obj.width, obj.height))
+  const t = canvas(Math.max(1, Math.round(obj.width * s)), Math.max(1, Math.round(obj.height * s)))
+  const ctx = t.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(obj, 0, 0, t.width, t.height)
+  const d = ctx.getImageData(0, 0, t.width, t.height).data
+  let x0 = t.width, y0 = t.height, x1 = -1, y1 = -1
+  for (let y = 0; y < t.height; y++)
+    for (let x = 0; x < t.width; x++)
+      if (d[(y * t.width + x) * 4 + 3] > 40) {
+        if (x < x0) x0 = x
+        if (x > x1) x1 = x
+        if (y < y0) y0 = y
+        if (y > y1) y1 = y
+      }
+  if (x1 < 0) return null
+  return { x0: x0 / s, y0: y0 / s, x1: (x1 + 1) / s, y1: (y1 + 1) / s }
+}
+
+/**
+ * Relight the object from the side where the backdrop is brightest: the lit side gets lifted, the far side dims.
+ * `amount` 0..1.
+ */
+export function relight(obj: HTMLCanvasElement, backdrop: HTMLCanvasElement, amount: number) {
+  if (amount <= 0.005) return
+  const t = canvas(48, 48)
+  const bctx = t.getContext('2d', { willReadFrequently: true })!
+  bctx.drawImage(backdrop, 0, 0, 48, 48)
+  const bd = bctx.getImageData(0, 0, 48, 48).data
+  let sx = 0, sy = 0, sw = 0
+  for (let y = 0; y < 48; y++)
+    for (let x = 0; x < 48; x++) {
+      const i = (y * 48 + x) * 4
+      const l = (0.299 * bd[i] + 0.587 * bd[i + 1] + 0.114 * bd[i + 2]) / 255
+      const w = l * l * l
+      sx += (x / 47 - 0.5) * w
+      sy += (y / 47 - 0.5) * w
+      sw += w
+    }
+  if (sw <= 0) return
+  let lx = sx / sw
+  let ly = sy / sw
+  const mag = Math.hypot(lx, ly)
+  if (mag < 0.04) return // even light: nothing to do
+  lx /= mag
+  ly /= mag
+  // how one-sided the light is decides how strong the effect can be
+  const strength = amount * Math.min(1, mag / 0.25)
+
+  const bb = bounds(obj)
+  if (!bb) return
+  const cx = (bb.x0 + bb.x1) / 2
+  const cy = (bb.y0 + bb.y1) / 2
+  const hw = Math.max(1, (bb.x1 - bb.x0) / 2)
+  const hh = Math.max(1, (bb.y1 - bb.y0) / 2)
+  const ctx = obj.getContext('2d', { willReadFrequently: true })!
+  const img = ctx.getImageData(0, 0, obj.width, obj.height)
+  const d = img.data
+  for (let y = 0; y < obj.height; y++) {
+    const ny = (y - cy) / hh
+    for (let x = 0; x < obj.width; x++) {
+      const i = (y * obj.width + x) * 4
+      if (d[i + 3] === 0) continue
+      const tt = Math.max(-1, Math.min(1, ((x - cx) / hw) * lx + ny * ly))
+      const gain = 1 + strength * 0.4 * tt
+      d[i] = Math.min(255, d[i] * gain)
+      d[i + 1] = Math.min(255, d[i + 1] * gain)
+      d[i + 2] = Math.min(255, d[i + 2] * gain)
+    }
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+/**
+ * Light wrap: the backdrop's own colours spill a little way over the object's edge, as if the light behind
+ * it bent around the silhouette. `amount` 0..1.
+ */
+export function lightWrap(obj: HTMLCanvasElement, backdrop: HTMLCanvasElement, amount: number) {
+  if (amount <= 0.005) return
+  const W = obj.width
+  const H = obj.height
+  const r = Math.max(2, Math.round(Math.max(W, H) * 0.012 * (0.6 + amount)))
+
+  // edge band: object alpha minus its blurred self -> opaque only just inside the silhouette
+  const band = canvas(W, H)
+  const bctx = band.getContext('2d')!
+  bctx.drawImage(obj, 0, 0)
+  bctx.globalCompositeOperation = 'source-in'
+  bctx.fillStyle = '#fff'
+  bctx.fillRect(0, 0, W, H)
+  const inner = canvas(W, H)
+  const ictx = inner.getContext('2d')!
+  ictx.filter = `blur(${r}px)`
+  ictx.drawImage(band, 0, 0)
+  bctx.globalCompositeOperation = 'destination-out'
+  bctx.drawImage(inner, 0, 0)
+
+  // colour it with a blurred backdrop
+  bctx.globalCompositeOperation = 'source-in'
+  bctx.filter = `blur(${r * 2}px)`
+  bctx.drawImage(backdrop, 0, 0, W, H)
+  bctx.filter = 'none'
+
+  const octx = obj.getContext('2d')!
+  octx.globalCompositeOperation = 'source-atop'
+  octx.globalAlpha = Math.min(1, amount * 0.9)
+  octx.drawImage(band, 0, 0)
+  octx.globalAlpha = 1
+  octx.globalCompositeOperation = 'source-over'
 }
