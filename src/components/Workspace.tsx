@@ -4,7 +4,7 @@ import { BRAND } from '../brand'
 import { DEFAULT_PARAMS, Dissolver } from '../lib/dissolve'
 import type { ColorMode, Params, Shape } from '../lib/dissolve'
 import { buildLayers, download, isAbort, renderExport } from '../lib/exporter'
-import type { ExportOptions } from '../lib/exporter'
+import type { ExportOptions, FillSpec } from '../lib/exporter'
 import {
   clearMask, invertMask, maskFromAlpha, mk, selectAll,
 } from '../lib/selection'
@@ -53,6 +53,7 @@ const TABS = [
   { id: 'direction', no: 'II', en: 'Direction', cn: '方向' },
   { id: 'size', no: 'III', en: 'Size', cn: '大小' },
   { id: 'shape', no: 'IV', en: 'Shape', cn: '形状' },
+  { id: 'fill', no: 'V', en: 'Fill', cn: '补底' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
 
@@ -64,6 +65,17 @@ const SWATCHES = [
   { hex: '#E8E1D0', name: 'Bone' },
   { hex: '#6B3A7D', name: 'Violet' },
 ]
+
+const FILL_COLORS = [
+  { hex: '#F4F2ED', name: 'Paper' },
+  { hex: '#0E0E0E', name: 'Ink' },
+  { hex: '#F2A7C3', name: 'Rose' },
+  { hex: '#9A9AA0', name: 'Silver' },
+  { hex: '#8A1B2D', name: 'Blood' },
+  { hex: '#E8E1D0', name: 'Bone' },
+]
+
+type FillMode = 'auto' | 'plate' | 'solid'
 
 const SHAPES: { id: Shape; en: string; cn: string }[] = [
   { id: 'shard', en: 'Shard', cn: '碎片' },
@@ -150,6 +162,38 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [hasMask, setHasMask] = useState(false)
   const [maskTick, setMaskTick] = useState(0)
   const [docVersion, setDocVersion] = useState(0)
+  const [fillMode, setFillMode] = useState<FillMode>('auto')
+  const [fillColor, setFillColor] = useState('#F4F2ED')
+  const [plate, setPlate] = useState<{ canvas: HTMLCanvasElement; url: string; name: string } | null>(null)
+  const plateInput = useRef<HTMLInputElement>(null)
+  const fill = useMemo<FillSpec>(
+    () =>
+      fillMode === 'plate' && plate
+        ? { kind: 'plate', canvas: plate.canvas }
+        : fillMode === 'solid'
+          ? { kind: 'solid', color: fillColor }
+          : { kind: 'auto' },
+    [fillMode, fillColor, plate],
+  )
+
+  const takePlate = async (f?: File) => {
+    if (!f || !f.type.startsWith('image/')) return
+    const url = URL.createObjectURL(f)
+    try {
+      const img = await loadImage(url)
+      const s = Math.min(1, MAX_SIDE / Math.max(img.width, img.height))
+      const c = mk(img.width * s, img.height * s)
+      c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
+      setPlate((old) => {
+        if (old) URL.revokeObjectURL(old.url)
+        return { canvas: c, url, name: f.name }
+      })
+      setFillMode('plate')
+    } catch {
+      URL.revokeObjectURL(url)
+      setToast('Could not read that image · 无法读取该图片')
+    }
+  }
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -220,13 +264,13 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     const H = Math.round(stage.h * dpr)
     c.width = W
     c.height = H
-    const { obj, bg, any } = buildLayers(base, mask, W, H)
+    const { obj, bg, any } = buildLayers(base, mask, W, H, fill)
 
     dis.current!.build(obj, bg, params.count, params.seed)
     setHasMask(any)
     syncTime()
     draw()
-  }, [stage.w, stage.h, params.count, params.seed, draw, syncTime])
+  }, [stage.w, stage.h, params.count, params.seed, fill, draw, syncTime])
 
   const commit = useCallback(() => {
     rebuild()
@@ -502,6 +546,78 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
             </>
           )}
 
+          {tab === 'fill' && (
+            <>
+              <div className="field">
+                <span className="mono mini">Where the object was 对象消失后的位置</span>
+                <Chips<FillMode>
+                  value={fillMode}
+                  onChange={setFillMode}
+                  items={[
+                    { id: 'auto', en: 'Auto', cn: '自动' },
+                    { id: 'plate', en: 'Clean plate', cn: '底图' },
+                    { id: 'solid', en: 'Solid', cn: '纯色' },
+                  ]}
+                />
+              </div>
+
+              {fillMode === 'auto' && (
+                <p className="note">
+                  Colours are diffused in from the surroundings. Good for walls, sky and soft gradients; busy
+                  backgrounds look smeared. <i className="cn">从周围扩散取色，适合平滑背景。复杂背景请用底图。</i>
+                </p>
+              )}
+
+              {fillMode === 'plate' && (
+                <>
+                  <div className="field">
+                    <span className="mono mini">Clean plate 干净的底图</span>
+                    <input
+                      ref={plateInput}
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={(e) => {
+                        void takePlate(e.target.files?.[0])
+                        e.target.value = ''
+                      }}
+                    />
+                    <button className="btn line" onClick={() => plateInput.current?.click()}>
+                      {plate ? 'Replace' : 'Choose image'} <i className="cn">{plate ? '更换' : '选择图片'}</i>
+                    </button>
+                    {plate && (
+                      <div className="plate">
+                        <img src={plate.url} alt="" />
+                        <span className="mono mini">{plate.name}</span>
+                        <Ghost
+                          onClick={() => {
+                            URL.revokeObjectURL(plate.url)
+                            setPlate(null)
+                          }}
+                        >
+                          Remove
+                        </Ghost>
+                      </div>
+                    )}
+                  </div>
+                  <p className="note">
+                    {plate
+                      ? 'Scaled to cover the photo. Use the same framing for a clean result.'
+                      : 'Same scene without the object, same framing as your photo. Until you add one, Auto is used.'}{' '}
+                    <i className="cn">与原图构图一致、不含该对象的同一场景。</i>
+                  </p>
+                </>
+              )}
+
+              {fillMode === 'solid' && (
+                <div className="field">
+                  <span className="mono mini">Colour 颜色</span>
+                  <Swatches colors={FILL_COLORS} value={fillColor} onChange={setFillColor} />
+                </div>
+              )}
+            </>
+          )}
+
           {tab === 'shape' && (
             <>
               <div className="shapes">
@@ -562,10 +678,12 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
               ratio: ASPECTS[aspect],
               stageW: stage.w,
               t: tRef.current,
+              transparent: opt.transparent,
               params,
               filter: FILTERS[filter],
               base,
               mask,
+              fill,
               onProgress,
               signal,
             }

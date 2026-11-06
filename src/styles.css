@@ -241,7 +241,7 @@ body::before {
 /* panel */
 .panel { grid-area: panel; border-left: 1px solid var(--faint); overflow: hidden auto; min-width: 0; }
 .ws.collapsed .panel { border-left: 0; visibility: hidden; }
-.tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--faint); position: sticky; top: 0; background: var(--bg); z-index: 3; transition: background 0.6s; }
+.tabs { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--faint); position: sticky; top: 0; background: var(--bg); z-index: 3; transition: background 0.6s; }
 .tab { padding: 14px 4px 12px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--soft); position: relative; transition: color 0.2s; }
 .tab .no { font-size: 10px; }
 .tab .ghost { font-family: var(--serif); font-size: 14px; letter-spacing: 0.02em; text-transform: none; font-weight: 600; padding: 0; }
@@ -388,3 +388,8 @@ input[type='range']:hover::-webkit-slider-thumb, input[type='range']:active::-we
 .render-prog { display: flex; align-items: center; gap: 14px; }
 .render-prog .bar { flex: 1; height: 3px; background: var(--faint); position: relative; }
 .render-prog .bar b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink); transition: width 0.12s linear; }
+
+/* fill tab */
+.plate { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; width: 100%; }
+.plate img { width: 56px; height: 56px; object-fit: cover; box-shadow: 0 0 0 1px var(--ink); display: block; }
+.plate .mini { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
