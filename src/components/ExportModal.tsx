@@ -21,6 +21,7 @@ export interface RenderOpts {
   shortSide: number
   fps: number
   transparent: boolean
+  greenScreen: boolean
 }
 
 export function ExportModal({
@@ -59,7 +60,7 @@ export function ExportModal({
     setError('')
     setProgress(0)
     try {
-      await onRender({ format: fmt as ExportFormat, shortSide: SHORT[res], fps: Number(fps), transparent: alphaOk && bg === 'clear' }, setProgress, ac.signal)
+      await onRender({ format: fmt as ExportFormat, shortSide: SHORT[res], fps: Number(fps), transparent: alphaOk && bg === 'clear', greenScreen: fmt === 'mp4' && bg === 'green' }, setProgress, ac.signal)
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -117,6 +118,19 @@ export function ExportModal({
                 ]}
               />
             </div>
+            )}
+            {fmt === 'mp4' && (
+              <div>
+                <span className="mono mini">Background 背景</span>
+                <Chips
+                  value={bg === 'green' ? 'green' : 'paper'}
+                  onChange={setBg}
+                  items={[
+                    { id: 'paper', en: 'Paper' },
+                    { id: 'green', en: 'Green screen', cn: '绿幕' },
+                  ]}
+                />
+              </div>
             )}
             {alphaOk && (
               <div>

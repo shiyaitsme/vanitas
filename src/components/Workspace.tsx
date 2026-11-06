@@ -732,6 +732,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
               stageW: stage.w,
               t: tRef.current,
               transparent: opt.transparent,
+              greenScreen: opt.greenScreen,
               params,
               filter: FILTERS[filter],
               base,
