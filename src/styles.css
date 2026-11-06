@@ -312,6 +312,33 @@ input[type='range']:hover::-webkit-slider-thumb, input[type='range']:active::-we
 .shape.on { background: var(--ink); color: var(--bg); box-shadow: none; }
 .note { font-family: var(--mono); font-size: 11px; color: var(--soft); margin: 0; }
 
+/* selection */
+.stage canvas.sel-overlay { position: absolute; left: 0; top: 0; z-index: 2; touch-action: none; }
+.empty-hint {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center;
+  padding: 18px 26px; background: color-mix(in srgb, #f4f2ed 92%, transparent); color: #0e0e0e;
+  box-shadow: inset 0 0 0 1px #0e0e0e;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.empty-hint b { font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.empty-hint .cn { text-transform: none; margin: 0; }
+.rail-sep { width: 26px; height: 1px; background: var(--faint); margin: 8px 0 4px; }
+.rail-act {
+  width: 52px; padding: 6px 0; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--soft); transition: color 0.2s;
+}
+.rail-act .cn { margin: 0; font-size: 9px; text-transform: none; }
+.rail-act:hover, .rail-act.on { color: var(--ink); }
+.rail-act.on { box-shadow: inset 0 -2px 0 var(--pink); }
+.sel-bar {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: 12px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--soft);
+  padding: 4px 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--faint);
+}
+.sel-bar input { width: 150px; }
+
 /* timeline */
 .timeline { grid-area: tl; border-top: 1px solid var(--faint); display: flex; align-items: center; gap: 14px; padding: 0 22px; }
 .play { width: 40px; height: 40px; display: grid; place-items: center; background: var(--ink); color: var(--bg); transition: background 0.2s, color 0.2s;

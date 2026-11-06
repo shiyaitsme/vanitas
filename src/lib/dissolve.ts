@@ -1,5 +1,7 @@
-// Placeholder 2D-canvas dissolve engine, used to judge look & feel in the prototype.
-// It will be replaced by a WebGL2 implementation; the parameter model stays the same.
+// Canvas2D dissolve engine. Works in device pixels.
+// Input: an `obj` layer (only the selected pixels) and a `bg` layer (everything else, hole filled).
+// Particle position at time t is a pure function of (particle, t, params), so scrubbing and
+// frame-accurate export need no accumulated simulation state.
 import { rng } from './thorns'
 
 export type Shape = 'square' | 'shard' | 'petal' | 'dot' | 'thorn' | 'letter'
@@ -55,10 +57,17 @@ const smooth = (a: number, b: number, v: number) => {
 }
 
 export class Dissolver {
+  W = 0
+  H = 0
   n = 0
-  w = 0
-  h = 0
   cell = 4
+  obj: HTMLCanvasElement | null = null
+  bg: HTMLCanvasElement | null = null
+  layer: HTMLCanvasElement | null = null
+  minX = 0
+  maxX = 0
+  minY = 0
+  maxY = 0
   x = new Float32Array(0)
   y = new Float32Array(0)
   r = new Uint8Array(0)
@@ -68,24 +77,37 @@ export class Dissolver {
   s1 = new Float32Array(0)
   s2 = new Float32Array(0)
   s3 = new Float32Array(0)
+  life = new Float32Array(0)
 
-  src: HTMLCanvasElement | null = null
-  lifeBuf = new Float32Array(0)
+  /** Number of selected pixels sampled into particles (0 when nothing is selected). */
+  get count() {
+    return this.n
+  }
 
-  build(source: HTMLCanvasElement, w: number, h: number, count: number, seed: number) {
-    this.w = w
-    this.h = h
-    this.src = source
-    const tmp = document.createElement('canvas')
-    tmp.width = Math.max(1, Math.round(w))
-    tmp.height = Math.max(1, Math.round(h))
-    const tctx = tmp.getContext('2d', { willReadFrequently: true })!
-    tctx.drawImage(source, 0, 0, tmp.width, tmp.height)
-    const data = tctx.getImageData(0, 0, tmp.width, tmp.height).data
-    const cell = Math.max(1.5, Math.sqrt((w * h) / count))
+  build(obj: HTMLCanvasElement, bg: HTMLCanvasElement | null, count: number, seed: number) {
+    const W = obj.width
+    const H = obj.height
+    this.W = W
+    this.H = H
+    this.obj = obj
+    this.bg = bg
+    if (!this.layer) this.layer = document.createElement('canvas')
+    this.layer.width = W
+    this.layer.height = H
+
+    const data = obj.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, W, H).data
+
+    // estimate object area so the particle count adapts to object size
+    let hits = 0
+    for (let y = 0; y < H; y += 3) {
+      for (let x = 0; x < W; x += 3) if (data[(y * W + x) * 4 + 3] > 24) hits++
+    }
+    const area = Math.max(1, hits * 9)
+    const cell = Math.max(1.2, Math.sqrt(area / count))
     this.cell = cell
+
     const rand = rng(seed * 9973 + 1)
-    const max = Math.ceil((w / cell) * (h / cell)) + 8
+    const max = Math.ceil((W / cell) * (H / cell)) + 8
     const x = new Float32Array(max)
     const y = new Float32Array(max)
     const r = new Uint8Array(max)
@@ -96,11 +118,12 @@ export class Dissolver {
     const s2 = new Float32Array(max)
     const s3 = new Float32Array(max)
     let n = 0
-    for (let gy = cell / 2; gy < h; gy += cell) {
-      for (let gx = cell / 2; gx < w; gx += cell) {
-        const px = Math.min(tmp.width - 1, Math.floor(gx))
-        const py = Math.min(tmp.height - 1, Math.floor(gy))
-        const i = (py * tmp.width + px) * 4
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (let gy = cell / 2; gy < H; gy += cell) {
+      for (let gx = cell / 2; gx < W; gx += cell) {
+        const px = Math.min(W - 1, Math.floor(gx))
+        const py = Math.min(H - 1, Math.floor(gy))
+        const i = (py * W + px) * 4
         if (data[i + 3] < 24) continue
         x[n] = gx
         y[n] = gy
@@ -111,10 +134,18 @@ export class Dissolver {
         s1[n] = rand()
         s2[n] = rand()
         s3[n] = rand()
+        if (gx < minX) minX = gx
+        if (gx > maxX) maxX = gx
+        if (gy < minY) minY = gy
+        if (gy > maxY) maxY = gy
         n++
       }
     }
     this.n = n
+    this.minX = n ? minX : 0
+    this.maxX = n ? maxX : 0
+    this.minY = n ? minY : 0
+    this.maxY = n ? maxY : 0
     this.x = x
     this.y = y
     this.r = r
@@ -124,51 +155,69 @@ export class Dissolver {
     this.s1 = s1
     this.s2 = s2
     this.s3 = s3
-    this.lifeBuf = new Float32Array(n)
+    this.life = new Float32Array(n)
   }
 
   render(ctx: CanvasRenderingContext2D, t: number, p: Params, dpr: number) {
-    const { w, h, n, cell } = this
+    const { W, H, n, cell } = this
     ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
     ctx.globalAlpha = 1
-    if (n === 0 || !this.src) return
-
-    // 1. the intact image, drawn crisp
-    ctx.drawImage(this.src, 0, 0, ctx.canvas.width, ctx.canvas.height)
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+    if (this.bg) ctx.drawImage(this.bg, 0, 0)
+    if (!this.obj || !this.layer || n === 0) return
 
     const rad = (p.angle * Math.PI) / 180
     const dx = Math.cos(rad)
     const dy = Math.sin(rad)
-    const cx = w / 2
-    const cy = h / 2
-    const diag = Math.hypot(w, h)
-    const T = t * 1.2
-    const t1 = hex(p.tint)
-    const t2 = hex(p.tint2)
-    const isTint = p.mode !== 'original'
-    const baseSize = cell * 1.06
-    ctx.font = `700 12px UnifrakturCook, serif`
-    ctx.textBaseline = 'middle'
-    ctx.textAlign = 'center'
 
-    // 2. erase the cells that have started to leave
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    // dissolve front sweeps exactly across the object's own extent
+    const bcx = (this.minX + this.maxX) / 2
+    const bcy = (this.minY + this.maxY) / 2
+    let pmin = Infinity
+    let pmax = -Infinity
+    for (const X of [this.minX, this.maxX]) {
+      for (const Y of [this.minY, this.maxY]) {
+        const v = (X - bcx) * dx + (Y - bcy) * dy
+        if (v < pmin) pmin = v
+        if (v > pmax) pmax = v
+      }
+    }
+    const span = Math.max(1, pmax - pmin)
+    const T = t * 1.2
+    const inv = 1 / dpr
+
+    // 1. intact part of the object, with released cells punched out
+    const lctx = this.layer.getContext('2d')!
+    lctx.setTransform(1, 0, 0, 1, 0, 0)
+    lctx.globalCompositeOperation = 'source-over'
+    lctx.clearRect(0, 0, W, H)
+    lctx.drawImage(this.obj, 0, 0)
     const half = cell / 2 + 0.6
     for (let i = 0; i < n; i++) {
       const x0 = this.x[i]
       const y0 = this.y[i]
-      const proj = ((x0 - cx) * dx + (y0 - cy) * dy) / diag + 0.5
-      const noise = 0.5 + 0.5 * Math.sin(x0 * 0.018 + Math.sin(y0 * 0.023 + p.seed) * 2 + p.seed * 6)
+      const proj = ((x0 - bcx) * dx + (y0 - bcy) * dy - pmin) / span
+      const noise = 0.5 + 0.5 * Math.sin(x0 * inv * 0.018 + Math.sin(y0 * inv * 0.023 + p.seed) * 2 + p.seed * 6)
       const delay = proj * 0.5 + noise * 0.18 + this.s1[i] * 0.08
       const life = clamp((T - delay) / 0.4)
-      this.lifeBuf[i] = life
-      if (life > 0) ctx.clearRect(x0 - half, y0 - half, half * 2, half * 2)
+      this.life[i] = life
+      if (life > 0) lctx.clearRect(x0 - half, y0 - half, half * 2, half * 2)
     }
+    ctx.drawImage(this.layer, 0, 0)
 
-    // 3. draw the flying particles
+    // 2. flying particles
+    const D = 0.5 * (Math.hypot(W, H) + Math.hypot(this.maxX - this.minX, this.maxY - this.minY))
+    const t1 = hex(p.tint)
+    const t2 = hex(p.tint2)
+    const isTint = p.mode !== 'original'
+    const baseSize = cell * 1.06
+    const sMin = p.sizeMin * dpr
+    const sMax = p.sizeMax * dpr
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'center'
+
     for (let i = 0; i < n; i++) {
-      const life = this.lifeBuf[i]
+      const life = this.life[i]
       if (life <= 0 || life >= 1) continue
       const x0 = this.x[i]
       const y0 = this.y[i]
@@ -176,11 +225,11 @@ export class Dissolver {
       let g = this.g[i]
       let b = this.b[i]
 
-      // colour
       if (isTint) {
-        const target = p.mode === 'gradient'
-          ? [t1[0] + (t2[0] - t1[0]) * life, t1[1] + (t2[1] - t1[1]) * life, t1[2] + (t2[2] - t1[2]) * life]
-          : t1
+        const target =
+          p.mode === 'gradient'
+            ? [t1[0] + (t2[0] - t1[0]) * life, t1[1] + (t2[1] - t1[1]) * life, t1[2] + (t2[2] - t1[2]) * life]
+            : t1
         const shade = 0.35 + 0.65 * this.luma[i]
         const k = smooth(0, 0.18, life)
         r += (target[0] * shade - r) * k
@@ -194,26 +243,24 @@ export class Dissolver {
         b += (PINK[2] - b) * k
       }
 
-      // motion
       const s1 = this.s1[i]
       const s2 = this.s2[i]
       const s3 = this.s3[i]
-      const d = Math.pow(life, 1.2) * diag * 0.38 * p.speed * (0.4 + s2 * 0.9)
+      const d = Math.pow(life, 1.2) * D * 0.38 * p.speed * (0.4 + s2 * 0.9)
       const side = (s3 - 0.5) * p.spread * d * 1.8
-      const wob = Math.sin(life * 7 + s1 * 30) * p.turbulence * diag * 0.022 * life
-      const x = x0 + dx * d - dy * side + wob * -dy
-      const y = y0 + dy * d + dx * side + wob * dx + p.gravity * life * life * diag * 0.28
+      const wob = Math.sin(life * 7 + s1 * 30) * p.turbulence * D * 0.022 * life
+      const x = x0 + dx * d - dy * side - wob * dy
+      const y = y0 + dy * d + dx * side + wob * dx + p.gravity * life * life * D * 0.28
 
-      const target = p.sizeMin + (p.sizeMax - p.sizeMin) * s2 * s2
+      const target = sMin + (sMax - sMin) * s2 * s2
       const z = (baseSize + (target - baseSize) * smooth(0, 0.2, life)) * (1 - p.decay * life * 0.85)
-      const alpha = 1 - smooth(0.5, 1, life)
       const rot = s1 * 6.283 + life * (s2 - 0.5) * 9
+      const cs = Math.cos(rot)
+      const sn = Math.sin(rot)
 
-      ctx.globalAlpha = alpha
+      ctx.globalAlpha = 1 - smooth(0.5, 1, life)
       ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`
-      const cs = Math.cos(rot) * dpr
-      const sn = Math.sin(rot) * dpr
-      ctx.setTransform(cs, sn, -sn, cs, x * dpr, y * dpr)
+      ctx.setTransform(cs, sn, -sn, cs, x, y)
 
       switch (p.shape) {
         case 'square':
@@ -245,7 +292,7 @@ export class Dissolver {
           ctx.fill()
           break
         case 'letter':
-          ctx.font = `700 ${Math.max(6, z * 2.2)}px UnifrakturCook, serif`
+          ctx.font = `700 ${Math.max(6 * dpr, z * 2.2)}px UnifrakturCook, serif`
           ctx.fillText(LETTERS[(s1 * LETTERS.length) | 0], 0, 0)
           break
       }

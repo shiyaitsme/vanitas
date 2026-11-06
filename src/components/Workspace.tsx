@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { BRAND } from '../brand'
 import { DEFAULT_PARAMS, Dissolver } from '../lib/dissolve'
 import type { ColorMode, Params, Shape } from '../lib/dissolve'
+import { fillHoles } from '../lib/inpaint'
+import {
+  clearMask, containRect, hasContent, invertMask, isMostlyOpaque, maskFromAlpha, mk, selectAll,
+} from '../lib/selection'
 import { ringPath } from '../lib/thorns'
 import { Ghost, ThemeToggle } from './Bits'
 import { Chips, Dial, Slider, Swatches } from './Controls'
 import { ExportModal } from './ExportModal'
 import {
-  IconAuto, IconBrush, IconEraser, IconLasso, IconLoop, IconPanel, IconPause, IconPlay, ShapeGlyph, THORN_CURSOR,
+  IconAuto, IconBrush, IconEraser, IconLasso, IconLoop, IconPanel, IconPause, IconPlay, ShapeGlyph,
 } from './Icons'
+import { SelectionOverlay } from './SelectionOverlay'
 import { ThornFrame } from './ThornFrame'
 
 interface Props {
@@ -31,11 +37,12 @@ type Aspect = keyof typeof ASPECTS
 const DURATION = 3.2
 const FPS = 30
 const TOTAL_FRAMES = Math.round(DURATION * FPS)
+const MAX_SIDE = 1600
 
 const TOOLS = [
-  { id: 'auto', icon: <IconAuto />, en: 'Auto', cn: '点击选择', hint: 'Click an object · 点击选择对象' },
-  { id: 'brush', icon: <IconBrush />, en: 'Brush', cn: '画笔', hint: 'Paint the area · 涂抹区域' },
-  { id: 'lasso', icon: <IconLasso />, en: 'Lasso', cn: '套索', hint: 'Circle the object · 圈出对象' },
+  { id: 'auto', icon: <IconAuto />, en: 'Auto', cn: '点击选择', hint: 'Coming next · 即将接入' },
+  { id: 'brush', icon: <IconBrush />, en: 'Brush', cn: '画笔', hint: 'Paint what dissolves · 涂抹要溶解的部分' },
+  { id: 'lasso', icon: <IconLasso />, en: 'Lasso', cn: '套索', hint: 'Draw around it · 圈出对象' },
   { id: 'erase', icon: <IconEraser />, en: 'Erase', cn: '擦除', hint: 'Subtract · 从选区擦除' },
 ] as const
 type ToolId = (typeof TOOLS)[number]['id']
@@ -80,9 +87,7 @@ async function makeSample(w: number, h: number): Promise<HTMLCanvasElement> {
   } catch {
     /* fall back to serif */
   }
-  const c = document.createElement('canvas')
-  c.width = Math.round(w)
-  c.height = Math.round(h)
+  const c = mk(w, h)
   const ctx = c.getContext('2d')!
   const cx = w / 2
   const cy = h * 0.42
@@ -114,7 +119,7 @@ async function makeSample(w: number, h: number): Promise<HTMLCanvasElement> {
   ctx.font = `700 ${w * 0.26}px UnifrakturCook, serif`
   ctx.fillText('Ashen', cx, h * 0.9)
   ctx.fillStyle = '#9A9AA0'
-  ctx.fillRect(cx - w * 0.3, h * 0.935, w * 0.6, 1.5)
+  ctx.fillRect(cx - w * 0.3, h * 0.935, w * 0.6, 3)
   return c
 }
 
@@ -130,7 +135,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: Props) {
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS)
   const [tab, setTab] = useState<TabId>('color')
-  const [tool, setTool] = useState<ToolId>('auto')
+  const [tool, setTool] = useState<ToolId>('brush')
   const [aspect, setAspect] = useState<Aspect>('4:5')
   const [filter, setFilter] = useState<FilterId>('none')
   const [playing, setPlaying] = useState(false)
@@ -139,10 +144,18 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [exportOpen, setExportOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
+  const [brush, setBrush] = useState(48)
+  const [showMask, setShowMask] = useState(true)
+  const [hasMask, setHasMask] = useState(false)
+  const [maskTick, setMaskTick] = useState(0)
+  const [docVersion, setDocVersion] = useState(0)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const dis = useRef(new Dissolver())
+  const baseRef = useRef<HTMLCanvasElement | null>(null)
+  const maskRef = useRef<HTMLCanvasElement | null>(null)
+  const dis = useRef<Dissolver | null>(null)
+  if (!dis.current) dis.current = new Dissolver()
   const paramsRef = useRef(params)
   const tRef = useRef(0.24)
   const dprRef = useRef(1)
@@ -191,42 +204,93 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     if (!c) return
     const ctx = c.getContext('2d')
     if (!ctx) return
-    dis.current.render(ctx, tRef.current, paramsRef.current, dprRef.current)
+    dis.current!.render(ctx, tRef.current, paramsRef.current, dprRef.current)
   }, [])
 
-  // (re)build particles when the source, size, count or seed change
+  /** Split the image into object (selected) and background (rest, hole filled) and rebuild particles. */
+  const rebuild = useCallback(() => {
+    const base = baseRef.current
+    const mask = maskRef.current
+    const c = canvasRef.current
+    if (!base || !mask || !c || stage.w < 10 || stage.h < 10) return
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    dprRef.current = dpr
+    const W = Math.round(stage.w * dpr)
+    const H = Math.round(stage.h * dpr)
+    c.width = W
+    c.height = H
+    const r = containRect(base.width, base.height, W, H)
+
+    const src = mk(W, H)
+    src.getContext('2d')!.drawImage(base, r.x, r.y, r.w, r.h)
+    const m = mk(W, H)
+    m.getContext('2d')!.drawImage(mask, r.x, r.y, r.w, r.h)
+    const any = hasContent(mask)
+
+    const obj = mk(W, H)
+    const octx = obj.getContext('2d')!
+    octx.drawImage(src, 0, 0)
+    octx.globalCompositeOperation = 'destination-in'
+    octx.drawImage(m, 0, 0)
+
+    const bg = mk(W, H)
+    const bctx = bg.getContext('2d')!
+    if (any && isMostlyOpaque(base)) {
+      const fill = fillHoles(src, m)
+      const fctx = fill.getContext('2d')!
+      fctx.globalCompositeOperation = 'destination-in'
+      fctx.drawImage(m, 0, 0)
+      bctx.drawImage(fill, 0, 0)
+    }
+    const punched = mk(W, H)
+    const pctx = punched.getContext('2d')!
+    pctx.drawImage(src, 0, 0)
+    pctx.globalCompositeOperation = 'destination-out'
+    pctx.drawImage(m, 0, 0)
+    bctx.drawImage(punched, 0, 0)
+
+    dis.current!.build(obj, bg, params.count, params.seed)
+    setHasMask(any)
+    syncTime()
+    draw()
+  }, [stage.w, stage.h, params.count, params.seed, draw, syncTime])
+
+  const commit = useCallback(() => {
+    rebuild()
+    setMaskTick((t) => t + 1)
+  }, [rebuild])
+
+  // load the document (source image + selection mask)
   useEffect(() => {
-    if (stage.w < 10 || stage.h < 10) return
     let cancelled = false
     ;(async () => {
-      let src: HTMLCanvasElement
+      let base: HTMLCanvasElement
       if (imageSrc) {
         const img = await loadImage(imageSrc)
-        src = document.createElement('canvas')
-        src.width = stage.w
-        src.height = stage.h
-        const ctx = src.getContext('2d')!
-        const s = Math.min(stage.w / img.width, stage.h / img.height)
-        const w = img.width * s
-        const h = img.height * s
-        ctx.drawImage(img, (stage.w - w) / 2, (stage.h - h) / 2, w, h)
+        const s = Math.min(1, MAX_SIDE / Math.max(img.width, img.height))
+        base = mk(img.width * s, img.height * s)
+        base.getContext('2d')!.drawImage(img, 0, 0, base.width, base.height)
       } else {
-        src = await makeSample(stage.w, stage.h)
+        base = await makeSample(1000, 1250)
       }
       if (cancelled) return
-      const dpr = Math.min(2, window.devicePixelRatio || 1)
-      dprRef.current = dpr
-      const c = canvasRef.current!
-      c.width = Math.round(stage.w * dpr)
-      c.height = Math.round(stage.h * dpr)
-      dis.current.build(src, stage.w, stage.h, params.count, params.seed)
-      syncTime()
-      draw()
+      const mask = mk(base.width, base.height)
+      if (!imageSrc) maskFromAlpha(base, mask) // sample: pre-select the artwork
+      baseRef.current = base
+      maskRef.current = mask
+      setDocVersion((v) => v + 1)
     })()
     return () => {
       cancelled = true
     }
-  }, [stage.w, stage.h, imageSrc, params.count, params.seed, draw, syncTime])
+  }, [imageSrc])
+
+  useEffect(() => {
+    if (docVersion > 0) {
+      rebuild()
+      setMaskTick((t) => t + 1)
+    }
+  }, [rebuild, docVersion])
 
   // redraw on param change
   useEffect(() => {
@@ -280,7 +344,15 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     return () => clearTimeout(id)
   }, [toast])
 
+  const edit = (fn: (mask: HTMLCanvasElement) => void) => {
+    const mask = maskRef.current
+    if (!mask) return
+    fn(mask)
+    commit()
+  }
+
   const currentTool = TOOLS.find((t) => t.id === tool)!
+  const painting = tool === 'brush' || tool === 'erase'
 
   return (
     <div className={`ws enter ${panelOpen ? '' : 'collapsed'}`}>
@@ -315,16 +387,51 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
             <span>{t.en}</span>
           </button>
         ))}
+        <div className="rail-sep" />
+        <button className="rail-act" onClick={() => edit(selectAll)} title="Select all · 全选">All<i className="cn">全选</i></button>
+        <button className="rail-act" onClick={() => edit(invertMask)} title="Invert · 反选">Invert<i className="cn">反选</i></button>
+        <button className="rail-act" onClick={() => edit(clearMask)} title="Clear · 清除">Clear<i className="cn">清除</i></button>
+        <button className={`rail-act ${showMask ? 'on' : ''}`} onClick={() => setShowMask((v) => !v)} title="Show selection · 显示选区">Mask<i className="cn">选区</i></button>
       </aside>
 
       <main className="stage-wrap" ref={wrapRef}>
+        {painting && (
+          <div className="sel-bar mono">
+            <span>{tool === 'erase' ? 'Eraser 橡皮' : 'Brush 笔刷'}</span>
+            <input
+              type="range"
+              min={8}
+              max={160}
+              value={brush}
+              style={{ '--p': `${((brush - 8) / 152) * 100}%` } as CSSProperties}
+              onChange={(e) => setBrush(Number(e.target.value))}
+            />
+            <span>{brush}px</span>
+          </div>
+        )}
         <div className="stage" style={{ width: stage.w, height: stage.h }}>
           <ThornFrame seed={5} />
-          <canvas
-            ref={canvasRef}
-            style={{ width: stage.w, height: stage.h, filter: FILTERS[filter], cursor: THORN_CURSOR }}
-            onClick={() => setToast('Selection is not wired yet · 选择功能将在下一阶段接入')}
+          <canvas ref={canvasRef} style={{ width: stage.w, height: stage.h, filter: FILTERS[filter] }} />
+          <SelectionOverlay
+            baseRef={baseRef}
+            maskRef={maskRef}
+            w={stage.w}
+            h={stage.h}
+            tool={tool}
+            brush={brush}
+            visible={!playing && showMask}
+            tick={maskTick}
+            onStart={() => setPlaying(false)}
+            onCommit={commit}
+            onAuto={() => setToast('Click-to-select arrives in a later step · 点击自动选择将在后续步骤接入')}
           />
+          {!hasMask && docVersion > 0 && (
+            <div className="empty-hint mono">
+              <b>Nothing selected</b>
+              <span>Paint over what should dissolve</span>
+              <i className="cn">用画笔涂抹要溶解的部分</i>
+            </div>
+          )}
           <span className="meta tl mono">{Math.round(stage.w * 2)} × {Math.round(stage.h * 2)}</span>
           <span className="meta tr mono">SEED {String(params.seed).padStart(3, '0')}</span>
           <span className="meta bl mono">{currentTool.hint}</span>
@@ -455,7 +562,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
           min={0}
           max={1000}
           defaultValue={240}
-          style={{ '--p': '24%' } as React.CSSProperties}
+          style={{ '--p': '24%' } as CSSProperties}
           onChange={(e) => {
             tRef.current = Number(e.target.value) / 1000
             syncTime()
