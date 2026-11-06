@@ -5,12 +5,13 @@ Read `README.md` first for status, architecture and how to verify. This file hol
 ## Project
 Browser-only web app: import an image, select an object, dissolve it into customizable particles, export video or images.
 Stack: Vite + TypeScript + React, Canvas2D engine (WebGL2 planned). Hosted on Cloudflare Workers Static Assets.
-Live: https://vanitas.shiya9863.workers.dev/ . Repo: `shiyaitsme/vanitas`, branch `main`.
+Live: https://vanitas.shiya9863.workers.dev/ . Repo: `shiyaitsme/vanitas`, default branch `main`.
 
 ## Working with the user
 - The user writes Chinese. Reply in Chinese, keep technical terms in English.
 - Build in steps, verify each step, then push. Report what was verified and what was not. Do not claim more than was tested.
 - No unrequested features or refactors. No tests unless asked. Ask before irreversible actions.
+- The SAM model is self-hosted in `public/models/slimsam` (Hugging Face is blocked for the user). No file in `dist` may exceed 25 MiB.
 - Never ask for Cloudflare tokens in chat. Deploys happen through the Git-connected Cloudflare project on push to `main`.
 
 ## Style rules (do not drift)
@@ -27,10 +28,14 @@ Live: https://vanitas.shiya9863.workers.dev/ . Repo: `shiyaitsme/vanitas`, branc
 - `npm run build` runs `tsc --noEmit`; keep it passing.
 
 ## Git
+- Do not commit to `main` directly. Branch, push, open a PR and merge it through `gh api` (see README, Working notes). Merging deploys.
 - Commit with explicit paths (`git add src package.json package-lock.json`). Never `git add .` or `-A`.
 - Commit as `Kiro <kiro@users.noreply.github.com>` via `git -c user.name=... -c user.email=...`. Do not change git config.
-- Delete helper files (`.preview/`, runners, test images) before committing. `.gitignore` covers node_modules, dist, .wrangler.
+- Delete helper files (`.preview/`, temp test folders such as `tmpq/`, runners, test images) before committing. `.gitignore` covers node_modules, dist, .wrangler.
 
 ## Next work
-Step 4 is built (see README); verify it in a real browser. Then step 5: record interaction,
-custom particle sprites, WebGL2 engine. Optional `?review` annotation mode if the user asks for it.
+Done: steps 1 to 4, MP4 green screen, backdrop compositing (colour match, light wrap, relight, depth blur).
+Open, in the order the user is likely to want them:
+1. Try backdrop compositing with the user's real photos and tune the defaults (colour match 0.6, wrap 0.5, relight 0.4, depth 0.4) from their feedback.
+2. Merge or drop the unmerged fill improvement in `src/lib/inpaint.ts` (stash on `fix/fill-background-2`). Test it first; it only matters for opaque photos without a backdrop.
+3. Step 5: record interaction, custom particle sprites, WebGL2 engine (real motion blur belongs here). Optional `?review` annotation mode if the user asks for it.

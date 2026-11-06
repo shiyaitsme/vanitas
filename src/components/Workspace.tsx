@@ -174,10 +174,13 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [objScale, setObjScale] = useState(0.7)
   const [objX, setObjX] = useState(0)
   const [objY, setObjY] = useState(0)
+  const [wrap, setWrap] = useState(0.5)
+  const [light, setLight] = useState(0.4)
+  const [depth, setDepth] = useState(0.4)
   const backdropInput = useRef<HTMLInputElement>(null)
   const scene = useMemo<Scene | null>(
-    () => (backdrop ? { backdrop: backdrop.canvas, match, scale: objScale, x: objX, y: objY } : null),
-    [backdrop, match, objScale, objX, objY],
+    () => (backdrop ? { backdrop: backdrop.canvas, match, scale: objScale, x: objX, y: objY, wrap, light, depth } : null),
+    [backdrop, match, objScale, objX, objY, wrap, light, depth],
   )
   const place = useMemo(() => (scene ? { scale: scene.scale, x: scene.x, y: scene.y } : undefined), [scene])
 
@@ -300,6 +303,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     c.height = H
     const { obj, bg, any } = buildLayers(base, mask, W, H, fill, scene)
 
+    dis.current!.depth = scene?.depth ?? 0
     dis.current!.build(obj, bg, params.count, params.seed)
     setHasMask(any)
     syncTime()
@@ -665,6 +669,9 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
               {backdrop ? (
                 <>
                   <Slider label="Colour match" cn="调色匹配" value={match} min={0} max={1} step={0.01} onChange={setMatch} fmt={(v) => v.toFixed(2)} />
+                  <Slider label="Light wrap" cn="边缘光晕" value={wrap} min={0} max={1} step={0.01} onChange={setWrap} fmt={(v) => v.toFixed(2)} />
+                  <Slider label="Relight" cn="光线方向" value={light} min={0} max={1} step={0.01} onChange={setLight} fmt={(v) => v.toFixed(2)} />
+                  <Slider label="Depth blur" cn="景深模糊" value={depth} min={0} max={1} step={0.01} onChange={setDepth} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Object size" cn="物体大小" value={objScale} min={0.15} max={1.4} step={0.01} onChange={setObjScale} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Position X" cn="水平位置" value={objX} min={-0.6} max={0.6} step={0.005} onChange={setObjX} fmt={(v) => v.toFixed(2)} />
                   <Slider label="Position Y" cn="垂直位置" value={objY} min={-0.6} max={0.6} step={0.005} onChange={setObjY} fmt={(v) => v.toFixed(2)} />

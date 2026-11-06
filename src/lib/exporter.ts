@@ -7,7 +7,7 @@ import { Dissolver } from './dissolve'
 import type { Params } from './dissolve'
 import { fillHoles } from './inpaint'
 import { hasContent, isMostlyOpaque, mk, placeRect } from './selection'
-import { matchColors } from './scene'
+import { lightWrap, matchColors, relight } from './scene'
 import type { Scene } from './scene'
 
 export const PAPER = '#f4f2ed'
@@ -64,6 +64,8 @@ export function buildLayers(
     bctx.imageSmoothingQuality = 'high'
     bctx.drawImage(b, (W - b.width * k) / 2, (H - b.height * k) / 2, b.width * k, b.height * k)
     matchColors(obj, bg, scene.match)
+    relight(obj, bg, scene.light)
+    lightWrap(obj, bg, scene.wrap)
     return { obj, bg, any }
   }
 
@@ -170,6 +172,7 @@ export async function renderExport(o: ExportOptions): Promise<ExportResult> {
   const dis = new Dissolver()
   dis.build(obj, transparent || keyed ? null : bg, o.params.count, o.params.seed)
   dis.solid = keyed
+  dis.depth = o.scene?.depth ?? 0
 
   const art = mk(W, H)
   const actx = art.getContext('2d')!
