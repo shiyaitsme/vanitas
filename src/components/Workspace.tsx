@@ -6,7 +6,7 @@ import type { ColorMode, Params, Shape } from '../lib/dissolve'
 import { buildLayers, download, isAbort, renderExport } from '../lib/exporter'
 import type { ExportOptions, FillSpec } from '../lib/exporter'
 import {
-  clearMask, invertMask, maskFromAlpha, mk, selectAll,
+  clearMask, invertMask, isMostlyOpaque, maskFromAlpha, mk, selectAll,
 } from '../lib/selection'
 import { Sam } from '../lib/sam'
 import { ringPath } from '../lib/thorns'
@@ -296,7 +296,8 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
       }
       if (cancelled) return
       const mask = mk(base.width, base.height)
-      if (!imageSrc) maskFromAlpha(base, mask) // sample: pre-select the artwork
+      // sample and transparent cut-outs: pre-select the object (every non-transparent pixel)
+      if (!imageSrc || !isMostlyOpaque(base)) maskFromAlpha(base, mask)
       baseRef.current = base
       maskRef.current = mask
       setDocVersion((v) => v + 1)
