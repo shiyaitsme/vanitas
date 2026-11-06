@@ -6,7 +6,9 @@ import { Zip, ZipPassThrough } from 'fflate'
 import { Dissolver } from './dissolve'
 import type { Params } from './dissolve'
 import { fillHoles } from './inpaint'
-import { containRect, hasContent, isMostlyOpaque, mk } from './selection'
+import { hasContent, isMostlyOpaque, mk, placeRect } from './selection'
+import { matchColors } from './scene'
+import type { Scene } from './scene'
 
 export const PAPER = '#f4f2ed'
 export const GREEN_SCREEN = '#00ff00'
@@ -30,8 +32,15 @@ export type FillSpec =
   | { kind: 'solid'; color: string }
 
 /** Split the image into the selected object and the (filled) rest, at W x H. */
-export function buildLayers(base: HTMLCanvasElement, mask: HTMLCanvasElement, W: number, H: number, fill: FillSpec = { kind: 'auto' }) {
-  const r = containRect(base.width, base.height, W, H)
+export function buildLayers(
+  base: HTMLCanvasElement,
+  mask: HTMLCanvasElement,
+  W: number,
+  H: number,
+  fill: FillSpec = { kind: 'auto' },
+  scene?: Scene | null,
+) {
+  const r = scene ? placeRect(base.width, base.height, W, H, scene.scale, scene.x, scene.y) : placeRect(base.width, base.height, W, H)
 
   const src = mk(W, H)
   src.getContext('2d')!.drawImage(base, r.x, r.y, r.w, r.h)
@@ -47,6 +56,17 @@ export function buildLayers(base: HTMLCanvasElement, mask: HTMLCanvasElement, W:
 
   const bg = mk(W, H)
   const bctx = bg.getContext('2d')!
+
+  if (scene) {
+    // object on a backdrop: the backdrop covers the stage, the object takes on its colours
+    const b = scene.backdrop
+    const k = Math.max(W / b.width, H / b.height)
+    bctx.imageSmoothingQuality = 'high'
+    bctx.drawImage(b, (W - b.width * k) / 2, (H - b.height * k) / 2, b.width * k, b.height * k)
+    matchColors(obj, bg, scene.match)
+    return { obj, bg, any }
+  }
+
   if (any) {
     let layer: HTMLCanvasElement | null = null
     if (fill.kind === 'plate') {
@@ -107,6 +127,7 @@ export interface ExportOptions {
   base: HTMLCanvasElement
   mask: HTMLCanvasElement
   fill?: FillSpec
+  scene?: Scene | null
   onProgress?: (p: number) => void
   signal?: AbortSignal
 }
@@ -144,7 +165,7 @@ export async function renderExport(o: ExportOptions): Promise<ExportResult> {
   const short = fmt === 'gif' ? Math.min(o.shortSide, GIF_MAX_SIDE) : o.shortSide
   const { w: W, h: H } = outputSize(o.ratio, short)
   const scale = W / o.stageW
-  const { obj, bg } = buildLayers(o.base, o.mask, W, H, o.fill)
+  const { obj, bg } = buildLayers(o.base, o.mask, W, H, o.fill, o.scene)
 
   const dis = new Dissolver()
   dis.build(obj, transparent || keyed ? null : bg, o.params.count, o.params.seed)

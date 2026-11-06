@@ -9,6 +9,7 @@ import {
   clearMask, invertMask, isMostlyOpaque, maskFromAlpha, mk, selectAll,
 } from '../lib/selection'
 import { Sam } from '../lib/sam'
+import type { Scene } from '../lib/scene'
 import { ringPath } from '../lib/thorns'
 import { Ghost, ThemeToggle } from './Bits'
 import { Chips, Dial, Slider, Swatches } from './Controls'
@@ -168,6 +169,35 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
   const [fillColor, setFillColor] = useState('#F4F2ED')
   const [plate, setPlate] = useState<{ canvas: HTMLCanvasElement; url: string; name: string } | null>(null)
   const plateInput = useRef<HTMLInputElement>(null)
+  const [backdrop, setBackdrop] = useState<{ canvas: HTMLCanvasElement; url: string; name: string } | null>(null)
+  const [match, setMatch] = useState(0.6)
+  const [objScale, setObjScale] = useState(0.7)
+  const [objX, setObjX] = useState(0)
+  const [objY, setObjY] = useState(0)
+  const backdropInput = useRef<HTMLInputElement>(null)
+  const scene = useMemo<Scene | null>(
+    () => (backdrop ? { backdrop: backdrop.canvas, match, scale: objScale, x: objX, y: objY } : null),
+    [backdrop, match, objScale, objX, objY],
+  )
+  const place = useMemo(() => (scene ? { scale: scene.scale, x: scene.x, y: scene.y } : undefined), [scene])
+
+  const takeBackdrop = async (f?: File) => {
+    if (!f || !f.type.startsWith('image/')) return
+    const url = URL.createObjectURL(f)
+    try {
+      const img = await loadImage(url)
+      const s = Math.min(1, MAX_SIDE / Math.max(img.width, img.height))
+      const c = mk(img.width * s, img.height * s)
+      c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
+      setBackdrop((old) => {
+        if (old) URL.revokeObjectURL(old.url)
+        return { canvas: c, url, name: f.name }
+      })
+    } catch {
+      URL.revokeObjectURL(url)
+      setToast('Could not read that image · 无法读取该图片')
+    }
+  }
   const samRef = useRef<Sam | null>(null)
   const samBusy = useRef(false)
   const fill = useMemo<FillSpec>(
@@ -268,13 +298,13 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
     const H = Math.round(stage.h * dpr)
     c.width = W
     c.height = H
-    const { obj, bg, any } = buildLayers(base, mask, W, H, fill)
+    const { obj, bg, any } = buildLayers(base, mask, W, H, fill, scene)
 
     dis.current!.build(obj, bg, params.count, params.seed)
     setHasMask(any)
     syncTime()
     draw()
-  }, [stage.w, stage.h, params.count, params.seed, fill, draw, syncTime])
+  }, [stage.w, stage.h, params.count, params.seed, fill, scene, draw, syncTime])
 
   const commit = useCallback(() => {
     rebuild()
@@ -490,6 +520,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
             tool={tool}
             brush={brush}
             visible={!playing && showMask}
+            place={place}
             tick={maskTick}
             onStart={() => setPlaying(false)}
             onCommit={commit}
@@ -602,6 +633,54 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
           {tab === 'fill' && (
             <>
               <div className="field">
+                <span className="mono mini">Backdrop 背景图</span>
+                <input
+                  ref={backdropInput}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => {
+                    void takeBackdrop(e.target.files?.[0])
+                    e.target.value = ''
+                  }}
+                />
+                <button className="btn line" onClick={() => backdropInput.current?.click()}>
+                  {backdrop ? 'Replace' : 'Choose image'} <i className="cn">{backdrop ? '更换' : '选择图片'}</i>
+                </button>
+                {backdrop && (
+                  <div className="plate">
+                    <img src={backdrop.url} alt="" />
+                    <span className="mono mini">{backdrop.name}</span>
+                    <Ghost
+                      onClick={() => {
+                        URL.revokeObjectURL(backdrop.url)
+                        setBackdrop(null)
+                      }}
+                    >
+                      Remove
+                    </Ghost>
+                  </div>
+                )}
+              </div>
+              {backdrop ? (
+                <>
+                  <Slider label="Colour match" cn="调色匹配" value={match} min={0} max={1} step={0.01} onChange={setMatch} fmt={(v) => v.toFixed(2)} />
+                  <Slider label="Object size" cn="物体大小" value={objScale} min={0.15} max={1.4} step={0.01} onChange={setObjScale} fmt={(v) => v.toFixed(2)} />
+                  <Slider label="Position X" cn="水平位置" value={objX} min={-0.6} max={0.6} step={0.005} onChange={setObjX} fmt={(v) => v.toFixed(2)} />
+                  <Slider label="Position Y" cn="垂直位置" value={objY} min={-0.6} max={0.6} step={0.005} onChange={setObjY} fmt={(v) => v.toFixed(2)} />
+                  <p className="note">
+                    The object sits on the backdrop and takes on its tones. Only the selection dissolves; the rest of the photo is not shown.{' '}
+                    <i className="cn">物体放在背景图上并向其色调靠拢。只有选区会溶解，原图其余部分不显示。</i>
+                  </p>
+                </>
+              ) : (
+                <p className="note">
+                  Add a backdrop to composite here instead of in an editor. <i className="cn">添加背景图，直接在这里合成。</i>
+                </p>
+              )}
+              {!backdrop && (
+              <>
+              <div className="field">
                 <span className="mono mini">Where the object was 对象消失后的位置</span>
                 <Chips<FillMode>
                   value={fillMode}
@@ -667,6 +746,8 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
                   <span className="mono mini">Colour 颜色</span>
                   <Swatches colors={FILL_COLORS} value={fillColor} onChange={setFillColor} />
                 </div>
+              )}
+              </>
               )}
             </>
           )}
@@ -738,6 +819,7 @@ export function Workspace({ theme, onToggleTheme, imageSrc, fileName, onBack }: 
               base,
               mask,
               fill,
+              scene,
               onProgress,
               signal,
             }
