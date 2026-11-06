@@ -20,10 +20,23 @@ function load(): Promise<Loaded> {
       if (p.status === 'progress' && typeof p.progress === 'number') postMessage({ type: 'progress', value: p.progress })
     }
     const device = 'gpu' in navigator ? 'webgpu' : 'wasm'
-    const p: Promise<Loaded> = Promise.all([
-      SamModel.from_pretrained(MODEL, { device, progress_callback }),
-      AutoProcessor.from_pretrained(MODEL),
-    ]).then(([model, processor]) => ({ model: model as SamModel, processor }))
+    // try the Hugging Face Hub first, then a public mirror (the Hub is unreachable from some networks)
+    const hosts = ['https://huggingface.co/', 'https://hf-mirror.com/']
+    const attempt = async (i: number): Promise<Loaded> => {
+      env.remoteHost = hosts[i]
+      try {
+        const [model, processor] = await Promise.all([
+          SamModel.from_pretrained(MODEL, { device, progress_callback }),
+          AutoProcessor.from_pretrained(MODEL),
+        ])
+        return { model: model as SamModel, processor }
+      } catch (err) {
+        if (i + 1 < hosts.length) return attempt(i + 1)
+        const m = err instanceof Error ? err.message : String(err)
+        throw new Error(`${m} (${hosts.join(', ')}; device ${device})`)
+      }
+    }
+    const p: Promise<Loaded> = attempt(0)
     p.catch(() => {
       loading = null
     })
